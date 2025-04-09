@@ -1,0 +1,24 @@
+{
+    "shopping_list": "רשימת קניות",
+    "add_item_placeholder": "הוסף פריט...",
+    "add": "הוסף",
+    "logout": "התנתק",
+    "back_main": "חזרה למסך הראשי",
+    "main": {
+        "title": "מסך ראשי",
+        "createList": "צור רשימה",
+        "editList": "ערוך רשימה",
+        "existingLists": "רשימות קיימות",
+        "previousShoppings": "קניות קודמות",
+        "lastWeek": "שבוע שעבר",
+        "twoWeeksAgo": "לפני שבועיים",
+        "logout": "התנתק"
+    },
+    "login": {
+        "title": "התחברות",
+        "username": "שם משתמש",
+        "password": "סיסמה",
+        "login": "התחבר",
+        "signupPrompt": "אין לך חשבון? הירשם"
+    }
+}

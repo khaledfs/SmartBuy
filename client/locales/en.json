@@ -1,0 +1,24 @@
+{
+    "shopping_list": "Shopping List",
+    "add_item_placeholder": "Add an item...",
+    "add": "Add",
+    "logout": "Logout",
+    "back_main": "Back to Main",
+    "main": {
+        "title": "Main Screen",
+        "createList": "Create List",
+        "editList": "Edit List",
+        "existingLists": "Existing Lists",
+        "previousShoppings": "Previous Shoppings",
+        "lastWeek": "Last Week",
+        "twoWeeksAgo": "2 Weeks Ago",
+        "logout": "Logout"
+    },
+    "login": {
+        "title": "Login",
+        "username": "Username",
+        "password": "Password",
+        "login": "Login",
+        "signupPrompt": "Don't have an account? Sign up"
+    }
+}
