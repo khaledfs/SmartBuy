@@ -1,3 +1,4 @@
+// client/screens/ShoppingList.js
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -10,57 +11,38 @@ import {
   Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
+import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
-
-const API_URL = 'http://10.0.2.2:3000/api/list';
-const SUGGESTIONS_API = 'http://10.0.2.2:3000/api/suggestions';
 
 export default function ShoppingList({ navigation }) {
   const [item, setItem] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
 
-  const fetchItems = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) return navigation.replace('Login');
-      const res = await axios.get(API_URL, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setItems(res.data);
-    } catch (error) {
-      console.error('Fetch error:', error.message);
-    }
-  };
-
-  const fetchSuggestions = async () => {
-    try {
-      const res = await axios.get(SUGGESTIONS_API);
-      setSuggestions(res.data);
-    } catch (err) {
-      console.error('Suggestions fetch error:', err.message);
-    }
-  };
-
   useEffect(() => {
-    fetchItems();
-    fetchSuggestions();
+    const init = async () => {
+      try {
+        const token = await AsyncStorage.getItem('token');
+        if (!token) return navigation.replace('Login');
+
+        const [listRes, suggestionsRes] = await Promise.all([
+          api.get('/list'),
+          api.get('/suggestions'),
+        ]);
+
+        setItems(listRes.data);
+        setSuggestions(suggestionsRes.data);
+      } catch (error) {
+        console.error('Init error:', error.message);
+      }
+    };
+    init();
   }, []);
 
-  const handleAddItem = async () => {
-    if (!item.trim()) return;
+  const handleAddItem = async (name) => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await axios.post(
-        API_URL,
-        { name: item },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const res = await api.post('/list', { name });
       setItems([res.data, ...items]);
-      setItem('');
     } catch (error) {
       console.error('Add error:', error.message);
     }
@@ -68,10 +50,7 @@ export default function ShoppingList({ navigation }) {
 
   const handleDeleteItem = async (id) => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      await axios.delete(`${API_URL}/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.delete(`/list/${id}`);
       setItems(items.filter((i) => i._id !== id));
     } catch (error) {
       console.error('Delete error:', error.message);
@@ -84,9 +63,14 @@ export default function ShoppingList({ navigation }) {
   };
 
   const renderGroupedSuggestions = () => {
-    const grouped = suggestions.reduce((acc, item) => {
-      if (!acc[item.category]) acc[item.category] = [];
-      acc[item.category].push(item);
+    const grouped = suggestions.reduce((acc, suggestion) => {
+      const nameLower = suggestion.name?.en?.toLowerCase?.();
+      if (!nameLower) return acc;
+      const search = item.toLowerCase();
+      if (nameLower.startsWith(search)) {
+        if (!acc[suggestion.category]) acc[suggestion.category] = [];
+        acc[suggestion.category].push(suggestion);
+      }
       return acc;
     }, {});
 
@@ -94,10 +78,14 @@ export default function ShoppingList({ navigation }) {
       <View key={category} style={styles.card}>
         <Text style={styles.cardTitle}>{category}</Text>
         <View style={styles.iconRow}>
-          {items.map((item) => (
-            <TouchableOpacity key={item.key} style={styles.iconContainer} onPress={() => setItem(item.name.en)}>
-              <Image source={{ uri: item.icon.light }} style={styles.icon} />
-              <Text style={styles.iconLabel}>{item.name.en}</Text>
+          {items.map((i) => (
+            <TouchableOpacity
+              key={i.key}
+              style={styles.iconContainer}
+              onPress={() => handleAddItem(i.name.en)}
+            >
+              <Image source={{ uri: i.icon.light }} style={styles.icon} />
+              <Text style={styles.iconLabel}>{i.name.en}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -130,14 +118,12 @@ export default function ShoppingList({ navigation }) {
 
       <TextInput
         style={styles.input}
-        placeholder="Add an item..."
+        placeholder="Search items..."
         value={item}
         onChangeText={setItem}
         autoComplete="off"
         autoCorrect={false}
       />
-
-      <Button title="ADD" onPress={handleAddItem} />
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
         <Text style={styles.subtitle}>Suggestions</Text>
@@ -146,6 +132,8 @@ export default function ShoppingList({ navigation }) {
 
       <View style={styles.footer}>
         <Button title="Back to Main Screen" onPress={() => navigation.navigate('Main')} />
+        <View style={{ marginTop: 10 }} />
+
         <Button title="Logout" onPress={logout} color="red" />
       </View>
     </View>
@@ -172,7 +160,11 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cardTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
-  iconRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  iconRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+  },
   iconContainer: { alignItems: 'center', width: 80, marginBottom: 12 },
   icon: { width: 40, height: 40, marginBottom: 4 },
   iconLabel: { fontSize: 12, textAlign: 'center' },

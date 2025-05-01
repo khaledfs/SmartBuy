@@ -1,95 +1,193 @@
-// MainScreen.js (updated to match UI from second image)
+// client/screens/MainScreen.js
 import React, { useEffect, useState } from 'react';
 import {
-    View,
-    Text,
-    Button,
-    StyleSheet,
-    FlatList,
-    TouchableOpacity,
+  View,
+  Text,
+  Button,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Modal,
+  TextInput,
+  SafeAreaView,
+  Alert
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-
-const API_URL = 'http://10.0.2.2:3000/api/lists';
+import api from '../services/api';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function MainScreen({ navigation }) {
-    const [lists, setLists] = useState([]);
+  const [lists, setLists] = useState([]);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [renameName, setRenameName] = useState('');
+  const [listToRename, setListToRename] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
 
-    const fetchLists = async () => {
-        try {
-            const token = await AsyncStorage.getItem('token');
-            const res = await axios.get(API_URL, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            setLists(res.data);
-        } catch (err) {
-            console.error('Fetch lists error:', err);
-        }
+  const fetchLists = async () => {
+    try {
+      const res = await api.get('/lists');
+      setLists(res.data);
+    } catch (err) {
+      console.error('Fetch lists error:', err);
+    }
+  };
+
+  // Check auth and initial load
+  useEffect(() => {
+    const checkSession = async () => {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) navigation.replace('Login');
+      else fetchLists();
     };
+    checkSession();
+  }, []);
 
-    useEffect(() => {
-        const checkSession = async () => {
-            const token = await AsyncStorage.getItem('token');
-            if (!token) navigation.replace('Login');
-            else fetchLists();
-        };
-        checkSession();
-    }, []);
+  // Re-fetch on focus
+  useEffect(() => navigation.addListener('focus', fetchLists), [navigation]);
 
-    const logout = async () => {
-        await AsyncStorage.removeItem('token');
-        navigation.replace('Login');
-    };
+  const logout = async () => {
+    await AsyncStorage.removeItem('token');
+    navigation.replace('Login');
+  };
 
-    return (
-        <View style={styles.container}>
-            <Text style={styles.title}>Main Screen</Text>
+  const openRenameModal = (list) => {
+    setListToRename(list);
+    setRenameName(list.name);
+    setRenameModalVisible(true);
+  };
 
-            <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('ShoppingList')}>
-                    <Text style={styles.buttonText}>CREATE LIST</Text>
-                </TouchableOpacity>
+  const handleRename = async () => {
+    if (!renameName.trim()) return Alert.alert('Invalid Name', 'Please enter a valid list name.');
+    try {
+      await api.patch(`/lists/${listToRename._id}`, { name: renameName.trim() });
+      setRenameModalVisible(false);
+      fetchLists();
+    } catch (err) {
+      console.error('Rename error:', err);
+      Alert.alert('Error', 'Could not rename list. Please try again.');
+    }
+  };
 
-                <TouchableOpacity style={styles.button}>
-                    <Text style={styles.buttonText}>EDIT LIST</Text>
-                </TouchableOpacity>
-            </View>
+  const handleEditList = (list) => {
+    // reset edit mode and navigate
+    setIsEditing(false);
+    navigation.navigate('MyList', {
+      listId:   list._id,
+      listName: list.name,
+    });
+  };
 
-            <Text style={styles.subtitle}>Existing Lists</Text>
-            <FlatList
-                data={lists}
-                keyExtractor={(item) => item._id}
-                renderItem={({ item }) => (
-                    <Text style={styles.item}>- {item.name}</Text>
-                )}
+  const renderItem = ({ item }) => (
+    <View style={styles.listRow}>
+      {isEditing ? (
+        <TouchableOpacity onPress={() => handleEditList(item)} style={styles.listButton}>
+          <Text style={styles.item}>• {item.name}</Text>
+        </TouchableOpacity>
+      ) : (
+        <Text style={styles.item}>- {item.name}</Text>
+      )}
+      {!isEditing && (
+        <TouchableOpacity onPress={() => openRenameModal(item)}>
+          <Icon name="create-outline" size={20} color="#666" />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.title}>Smart Buy</Text>
+
+      <View style={styles.buttonRow}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={async () => {
+            try {
+              // clear all basket items by fetching and deleting each
+              const { data } = await api.get('/list');
+              await Promise.all(data.map(item => api.delete(`/list/${item._id}`)));
+              // reset any edit mode
+              setIsEditing(false);
+              navigation.navigate('ShoppingList');
+            } catch (err) {
+              console.error('Error clearing basket:', err);
+              Alert.alert('Error', 'Could not clear basket. Please try again.');
+            }
+          }}
+        >
+          <Text style={styles.buttonText}>CREATE LIST</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, isEditing && styles.buttonActive]}
+          onPress={() => setIsEditing(prev => !prev)}
+        >
+          <Text style={styles.buttonText}>{isEditing ? 'CANCEL EDIT' : 'EDIT LIST'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {isEditing && <Text style={styles.helperText}>Tap a list to edit its items</Text>}
+
+      <Text style={styles.subtitle}>Existing Lists</Text>
+      <FlatList
+        data={lists}
+        keyExtractor={item => item._id}
+        renderItem={renderItem}
+      />
+
+      <Text style={styles.subtitle}>Previous Shoppings</Text>
+      <FlatList
+        data={[{ id: '3', name: 'Last Week' }, { id: '4', name: '2 Weeks Ago' }]}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => <Text style={styles.item}>- {item.name}</Text>}
+      />
+
+      <View>
+        <Button title="LOGOUT" color="red" onPress={logout} />
+      </View>
+
+      {/* Rename List Modal */}
+      <Modal
+        visible={renameModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRenameModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Rename List</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="New List Name"
+              value={renameName}
+              onChangeText={setRenameName}
             />
-
-            <Text style={styles.subtitle}>Previous Shoppings</Text>
-            <FlatList
-                data={[{ id: '3', name: 'Last Week' }, { id: '4', name: '2 Weeks Ago' }]}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => <Text style={styles.item}>- {item.name}</Text>}
-            />
-
-            <View style={{ marginTop: 20 }}>
-                <Button title="LOGOUT" color="red" onPress={logout} />
+            <View style={styles.modalButtons}>
+              <Button title="Cancel" onPress={() => setRenameModalVisible(false)} />
+              <Button title="Save" onPress={handleRename} />
             </View>
+          </View>
         </View>
-    );
+      </Modal>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, padding: 20, backgroundColor: '#fff' },
-    title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-    subtitle: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
-    item: { fontSize: 16, marginBottom: 4 },
-    buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
-    button: {
-        backgroundColor: '#2196F3',
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 6,
-    },
-    buttonText: { color: '#fff', fontWeight: 'bold' },
+  container: { flex: 1, padding: 20, backgroundColor: '#fff' },
+  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  subtitle: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
+  helperText: { textAlign: 'center', marginBottom: 10, color: '#888' },
+  item: { fontSize: 16, flex: 1 },
+  listRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  listButton: { flex: 1 },
+  buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
+  button: { backgroundColor: '#2196F3', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 6 },
+  buttonActive: { backgroundColor: '#1976D2' },
+  buttonText: { color: '#fff', fontWeight: 'bold' },
+  modalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalContent: { width: '80%', backgroundColor: '#fff', borderRadius: 8, padding: 20 },
+  modalTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
+  modalInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, padding: 10, marginBottom: 20 },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-around' },
 });

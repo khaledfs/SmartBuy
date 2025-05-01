@@ -6,41 +6,55 @@ const createToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '3d' });
 };
 
+// controllers/authController.js
 exports.signup = async (req, res) => {
   const { username, phone, password } = req.body;
-
-  if (!username || !phone || !password) {
+  if (!username || !phone || !password)
     return res.status(400).json({ message: 'All fields are required' });
-  }
 
   try {
-    const existingUser = await User.findOne({ username });
+    // ONE round-trip to the DB
+    const existingUser = await User.findOne({
+      $or: [{ username }, { phone }]
+    });
+
     if (existingUser) {
-      return res.status(409).json({ message: 'Username already exists' });
+      const field = existingUser.username === username ? 'username' : 'phone';
+      return res.status(409).json({ message: `${field} already exists` });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({ username, phone, password: hashedPassword });
-
-    await newUser.save();
+    const hashed = await bcrypt.hash(password, 10);
+    const newUser = await User.create({ username, phone, password: hashed });
 
     const token = createToken(newUser._id);
     res.status(201).json({ message: 'User created', token });
   } catch (err) {
+    // duplicate-key fallback (if unique index catches it first)
+    if (err.code === 11000) {
+      const dupField = Object.keys(err.keyValue)[0];
+      return res.status(409).json({ message: `${dupField} already exists` });
+    }
     console.error('Signup error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-exports.login = async (req, res) => {
-  const { username, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Username and password required' });
+// controllers/authController.js
+exports.login = async (req, res) => {
+  const { identifier, password } = req.body;          
+  if (!identifier || !password) {
+    return res
+      .status(400)
+      .json({ message: 'Identifier (username or phone) and password required' });
   }
 
   try {
-    const user = await User.findOne({ username });
+    // one query, two possible matches
+    const user = await User.findOne({
+      $or: [{ username: identifier }, { phone: identifier }]
+    });
+
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -57,3 +71,4 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
