@@ -69,13 +69,13 @@ export default function MainScreen({ navigation }) {
   };
 
   const handleEditList = (list) => {
-    // reset edit mode and navigate
-    setIsEditing(false);
-    navigation.navigate('MyList', {
-      listId:   list._id,
-      listName: list.name,
-    });
-  };
+  setIsEditing(false);
+  navigation.navigate('ShoppingList', {
+    listId: list._id,
+    listName: list.name,
+  });
+};
+
 
   const renderItem = ({ item }) => (
     <View style={styles.listRow}>

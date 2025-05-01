@@ -1,5 +1,5 @@
 // client/screens/MyListScreen.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -33,26 +33,46 @@ const ICONS = {
 };
 
 export default function MyListScreen({ navigation, route }) {
-  // initial items and parent updater
-  const { items: initialItems, setItems: updateParentItems } = route.params;
+  const {
+    listId,
+    listName: originalName,
+    items: parentItems,
+    setItems: updateParentItems,
+    onDelete,
+  } = route.params || {};
 
-  const [items, setItems] = useState(initialItems || []);
+  const [items, setItems] = useState(parentItems || []);
   const [selected, setSelected] = useState({});
   const [modalVisible, setModalVisible] = useState(false);
-  const [listName, setListName] = useState('');
+  const [listName, setListName] = useState(originalName || '');
+
+  // If we're editing a saved list and parentItems wasn't passed, fetch it
+  useEffect(() => {
+    if (listId && !parentItems) {
+      (async () => {
+        try {
+          const res = await api.get(`/lists/${listId}`);
+          setItems(res.data.items);
+          setListName(res.data.name);
+        } catch (err) {
+          console.error('Could not load list:', err);
+        }
+      })();
+    }
+  }, [listId, parentItems]);
 
   const handleToggle = (id) => {
-    setSelected(prev => ({ ...prev, [id]: !prev[id] }));
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   const selectAll = () => {
-    const allSelected = {};
-    items.forEach(item => { allSelected[item._id] = true; });
-    setSelected(allSelected);
+    const all = {};
+    items.forEach((it) => { all[it._id] = true; });
+    setSelected(all);
   };
 
   const handleDeleteSelected = () => {
-    const toDelete = Object.keys(selected).filter(id => selected[id]);
+    const toDelete = Object.keys(selected).filter((id) => selected[id]);
     if (!toDelete.length) return;
 
     Alert.alert(
@@ -60,37 +80,56 @@ export default function MyListScreen({ navigation, route }) {
       `Are you sure you want to delete ${toDelete.length} item(s)?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
             try {
-              // delete each on server
-              for (let id of toDelete) {
-                await api.delete(`/list/${id}`);
+              // If a parent onDelete callback was passed, use it
+              if (onDelete) {
+                for (let id of toDelete) {
+                  await onDelete(id);
+                }
+              } else {
+                // fallback: delete from the basket endpoint
+                for (let id of toDelete) {
+                  await api.delete(`/list/${id}`);
+                }
               }
-              // update both local and parent state
-              const updated = items.filter(item => !toDelete.includes(item._id));
+              const updated = items.filter((it) => !toDelete.includes(it._id));
               setItems(updated);
-              updateParentItems(updated);
+              if (updateParentItems) updateParentItems(updated);
               setSelected({});
             } catch (err) {
-              console.error('Delete error:', err.message);
+              console.error('Delete error:', err);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
   const handleSaveList = async () => {
     if (!listName.trim()) {
-      Alert.alert('Invalid Name', 'Please enter a valid list name.');
-      return;
+      return Alert.alert('Invalid Name', 'Please enter a valid list name.');
     }
     try {
-      await api.post('/lists', { name: listName.trim(), items: items.map(i => i._id) });
+      const payload = {
+        name: listName.trim(),
+        items: items.map((i) => i._id),
+      };
+
+      if (listId) {
+        // update existing
+        await api.patch(`/lists/${listId}`, payload);
+      } else {
+        // create new
+        await api.post('/lists', payload);
+      }
       setModalVisible(false);
-      // List saved; stay on this screen and see updated list
+      // optionally: navigation.goBack();
     } catch (err) {
-      console.error('Save list error:', err.message);
+      console.error('Save list error:', err);
       Alert.alert('Error', 'Could not save list. Please try again.');
     }
   };
@@ -98,7 +137,9 @@ export default function MyListScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>🧾 My Shopping List</Text>
+        <Text style={styles.title}>
+          {listId ? `Editing: ${listName}` : '🧾 My Shopping List'}
+        </Text>
         <View style={styles.iconRow}>
           {Object.values(selected).some(Boolean) && (
             <>
@@ -115,7 +156,7 @@ export default function MyListScreen({ navigation, route }) {
 
       <FlatList
         data={items}
-        keyExtractor={item => item._id}
+        keyExtractor={(item) => item._id}
         renderItem={({ item }) => (
           <View style={styles.itemRow}>
             <Checkbox
@@ -132,7 +173,11 @@ export default function MyListScreen({ navigation, route }) {
       <View style={styles.footer}>
         <Button title="Save List" onPress={() => setModalVisible(true)} />
         <View style={{ height: 10 }} />
-        <Button title="Rename List" color="#FF9800" onPress={() => {/* implement rename later */}} />
+        <Button
+          title="Rename List"
+          color="#FF9800"
+          onPress={() => setModalVisible(true)}
+        />
       </View>
 
       <Modal
@@ -163,19 +208,48 @@ export default function MyListScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#fff' },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   title: { fontSize: 24, fontWeight: 'bold' },
   iconRow: { flexDirection: 'row', alignItems: 'center' },
-  selectAllBtn: { backgroundColor: '#d3d3d3', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
+  selectAllBtn: {
+    backgroundColor: '#d3d3d3',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
   selectAllText: { color: '#fff', fontWeight: 'bold' },
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, backgroundColor: '#f0f0f0', marginBottom: 6, paddingHorizontal: 10, borderRadius: 6 },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    backgroundColor: '#f0f0f0',
+    marginBottom: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+  },
   itemIcon: { width: 30, height: 30, marginHorizontal: 5 },
   itemText: { fontSize: 18, flex: 1, marginLeft: 10 },
   empty: { textAlign: 'center', marginTop: 20, fontStyle: 'italic', color: '#888' },
   footer: { marginTop: 20 },
-  modalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
   modalContent: { width: '80%', backgroundColor: '#fff', borderRadius: 8, padding: 20 },
   modalTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  modalInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, padding: 10, marginBottom: 20 },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 5,
+    padding: 10,
+    marginBottom: 20,
+  },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-around' },
 });

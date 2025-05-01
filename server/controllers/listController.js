@@ -73,3 +73,16 @@ exports.deleteList = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+// GET /api/lists/:id
+exports.getList = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const list = await List.findOne({ _id: id, owner: req.userId }).populate('items');
+    if (!list) return res.status(404).json({ message: 'List not found' });
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+

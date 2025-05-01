@@ -14,7 +14,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 
-export default function ShoppingList({ navigation }) {
+export default function ShoppingList({ navigation, route }) {
+  const { listId, listName } = route.params || {};
   const [item, setItem] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
@@ -25,19 +26,27 @@ export default function ShoppingList({ navigation }) {
         const token = await AsyncStorage.getItem('token');
         if (!token) return navigation.replace('Login');
 
-        const [listRes, suggestionsRes] = await Promise.all([
-          api.get('/list'),
-          api.get('/suggestions'),
-        ]);
-
-        setItems(listRes.data);
+        // fetch suggestions once
+        const suggestionsRes = await api.get('/suggestions');
         setSuggestions(suggestionsRes.data);
+
+        let itemsData = [];
+        if (listId) {
+          // editing an existing saved list
+          const listRes = await api.get(`/lists/${listId}`);
+          itemsData = listRes.data.items;
+        } else {
+          // brand-new basket
+          const listRes = await api.get('/list');
+          itemsData = listRes.data;
+        }
+        setItems(itemsData);
       } catch (error) {
         console.error('Init error:', error.message);
       }
     };
     init();
-  }, []);
+  }, [listId, navigation]);
 
   const handleAddItem = async (name) => {
     try {
@@ -96,11 +105,15 @@ export default function ShoppingList({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Shopping List</Text>
+        <Text style={styles.title}>
+          {listName ? `Editing: ${listName}` : 'Shopping List'}
+        </Text>
         <TouchableOpacity
           style={styles.basketIcon}
           onPress={() =>
             navigation.navigate('MyList', {
+              listId,
+              listName,
               items,
               setItems,
               onDelete: handleDeleteItem,
@@ -133,7 +146,6 @@ export default function ShoppingList({ navigation }) {
       <View style={styles.footer}>
         <Button title="Back to Main Screen" onPress={() => navigation.navigate('Main')} />
         <View style={{ marginTop: 10 }} />
-
         <Button title="Logout" onPress={logout} color="red" />
       </View>
     </View>
