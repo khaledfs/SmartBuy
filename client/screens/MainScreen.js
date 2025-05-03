@@ -102,57 +102,49 @@ const handleDeleteList = (id) => {
   
 
   const renderItem = ({ item }) => (
-  <View style={styles.listRow}>
-    {isEditing ? (
-      <>
-        {/* Tapping the name enters item-editing */}
-        <TouchableOpacity onPress={() => handleEditList(item)} style={styles.listButton}>
-          <Text style={styles.item}>• {item.name}</Text>
-        </TouchableOpacity>
-
-        {/* Only in edit mode: delete icon */}
-        <TouchableOpacity
-          onPress={() => handleDeleteList(item._id)}
-          style={styles.iconButton}
-        >
-          <Icon name="trash-outline" size={20} color="red" />
-        </TouchableOpacity>
-      </>
-    ) : (
-      <>
-        {/* Normal mode: just display name + rename icon */}
-        <Text style={styles.item}>- {item.name}</Text>
-        <TouchableOpacity
-          onPress={() => openRenameModal(item)}
-          style={styles.iconButton}
-        >
-          <Icon name="create-outline" size={20} color="#666" />
-        </TouchableOpacity>
-      </>
-    )}
-  </View>
-);
-
+    <View style={styles.listRow}>
+      {isEditing ? (
+        <>
+          {/* Tapping the name enters item-editing */}
+          <TouchableOpacity onPress={() => handleEditList(item)} style={styles.listButton}>
+            <Text style={styles.item}>• {item.name}</Text>
+          </TouchableOpacity>
+  
+          {/* Only in edit mode: delete icon */}
+          <TouchableOpacity
+            onPress={() => handleDeleteList(item._id)}
+            style={styles.iconButton}
+          >
+            <Icon name="trash-outline" size={20} color="red" />
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          {/* Normal mode: just display name + rename icon */}
+          <Text style={styles.item}>- {item.name}</Text>
+          <TouchableOpacity
+            onPress={() => openRenameModal(item)}
+            style={styles.iconButton}
+          >
+            <Icon name="create-outline" size={20} color="#666" />
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+  
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Smart Buy</Text>
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity
+      <TouchableOpacity
           style={styles.button}
-          onPress={async () => {
-            try {
-              // clear all basket items by fetching and deleting each
-              const { data } = await api.get('/list');
-              await Promise.all(data.map(item => api.delete(`/list/${item._id}`)));
-              // reset any edit mode
-              setIsEditing(false);
-              navigation.navigate('ShoppingList');
-            } catch (err) {
-              console.error('Error clearing basket:', err);
-              Alert.alert('Error', 'Could not clear basket. Please try again.');
-            }
+          onPress={() => {
+            // just reset edit mode and open a brand‐new basket
+            setIsEditing(false);
+            navigation.navigate('ShoppingList', { newBasket: true });
           }}
         >
           <Text style={styles.buttonText}>CREATE LIST</Text>

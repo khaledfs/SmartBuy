@@ -1,52 +1,46 @@
 // client/screens/ShoppingList.js
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  Button,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Image,
+  View, Text, TextInput, Button, TouchableOpacity,
+  StyleSheet, ScrollView, Image
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function ShoppingList({ navigation, route }) {
-  const { listId, listName } = route.params || {};
+  const { newBasket, listId, listName } = route.params || {};
   const [item, setItem] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
 
   useEffect(() => {
     const init = async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) return navigation.replace('Login');
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return navigation.replace('Login');
 
-        // fetch suggestions once
-        const suggestionsRes = await api.get('/suggestions');
-        setSuggestions(suggestionsRes.data);
+      // always fetch suggestions:
+      const { data: s } = await api.get('/suggestions');
+      setSuggestions(s);
 
-        let itemsData = [];
-        if (listId) {
-          // editing an existing saved list
-          const listRes = await api.get(`/lists/${listId}`);
-          itemsData = listRes.data.items;
-        } else {
-          // brand-new basket
-          const listRes = await api.get('/list');
-          itemsData = listRes.data;
-        }
-        setItems(itemsData);
-      } catch (error) {
-        console.error('Init error:', error.message);
+      if (newBasket) {
+        // 🚀 brand-new basket → start empty
+        setItems([]);
+      }
+      else if (listId) {
+        // editing a saved list
+        const { data: list } = await api.get(`/lists/${listId}`);
+        setItems(list.items);
+      } else {
+        // normal “shopping basket” mode
+        const { data: lst } = await api.get('/list');
+        setItems(lst);
       }
     };
     init();
-  }, [listId, navigation]);
+  }, [newBasket, listId, navigation]);
+
+  // … rest of your add/delete handlers unchanged …
 
   const handleAddItem = async (name) => {
     try {
