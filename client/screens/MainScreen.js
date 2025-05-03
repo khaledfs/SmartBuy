@@ -76,23 +76,63 @@ export default function MainScreen({ navigation }) {
   });
 };
 
+const handleDeleteList = (id) => {
+    Alert.alert(
+      'Delete List',
+      'Are you sure you want to delete this list?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/lists/${id}`);
+              // drop it locally
+              setLists(ls => ls.filter(l => l._id !== id));
+            } catch (err) {
+              console.error('Delete list error:', err);
+              Alert.alert('Error', 'Couldn’t delete list. Try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+  
 
   const renderItem = ({ item }) => (
-    <View style={styles.listRow}>
-      {isEditing ? (
+  <View style={styles.listRow}>
+    {isEditing ? (
+      <>
+        {/* Tapping the name enters item-editing */}
         <TouchableOpacity onPress={() => handleEditList(item)} style={styles.listButton}>
           <Text style={styles.item}>• {item.name}</Text>
         </TouchableOpacity>
-      ) : (
+
+        {/* Only in edit mode: delete icon */}
+        <TouchableOpacity
+          onPress={() => handleDeleteList(item._id)}
+          style={styles.iconButton}
+        >
+          <Icon name="trash-outline" size={20} color="red" />
+        </TouchableOpacity>
+      </>
+    ) : (
+      <>
+        {/* Normal mode: just display name + rename icon */}
         <Text style={styles.item}>- {item.name}</Text>
-      )}
-      {!isEditing && (
-        <TouchableOpacity onPress={() => openRenameModal(item)}>
+        <TouchableOpacity
+          onPress={() => openRenameModal(item)}
+          style={styles.iconButton}
+        >
           <Icon name="create-outline" size={20} color="#666" />
         </TouchableOpacity>
-      )}
-    </View>
-  );
+      </>
+    )}
+  </View>
+);
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -179,6 +219,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
   helperText: { textAlign: 'center', marginBottom: 10, color: '#888' },
   item: { fontSize: 16, flex: 1 },
+  iconButton: {marginHorizontal: 6},
   listRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   listButton: { flex: 1 },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },

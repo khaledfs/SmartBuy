@@ -1,5 +1,6 @@
 // server/controllers/listController.js
 const List = require('../models/List');
+const Item = require('../models/Item');   
 
 // GET all this user’s lists
 exports.getLists = async (req, res) => {
@@ -43,23 +44,39 @@ exports.createList = async (req, res) => {
   }
 };
 
-// PATCH (update) list name and/or items
 exports.updateList = async (req, res) => {
+  const { id } = req.params;
   const { name, items } = req.body;
-  const updateObj = {};
-  if (name)  updateObj.name  = name;
-  if (items) updateObj.items = Array.isArray(items) ? items : [];
 
   try {
-    const updated = await List.findOneAndUpdate(
-      { _id: req.params.id, owner: req.userId },
-      updateObj,
-      { new: true }
-    ).populate('items');
+    // 1. fetch the list (and verify ownership)
+    const list = await List.findOne({ _id: id, owner: req.userId });
+    if (!list) return res.status(404).json({ message: 'List not found' });
 
-    if (!updated) return res.status(404).json({ message: 'List not found' });
-    res.json(updated);
+    // 2. if the client sent a new items array, figure out which Item docs to delete
+    if (Array.isArray(items)) {
+      const newIds = items.map(i => i.toString());
+      const toRemove = list.items
+        .map(i => i.toString())
+        .filter(oldId => !newIds.includes(oldId));
+
+      // 3. delete those removed items from Mongo
+      await Promise.all(toRemove.map(itemId => Item.findByIdAndDelete(itemId)));
+
+      // 4. replace the list’s items
+      list.items = newIds;
+    }
+
+    // 5. optionally update the name
+    if (name) list.name = name;
+
+    // 6. save and return
+    await list.save();
+    await list.populate('items');
+    res.json(list);
+
   } catch (err) {
+    console.error('Error updating list:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -67,9 +84,15 @@ exports.updateList = async (req, res) => {
 // DELETE a list
 exports.deleteList = async (req, res) => {
   try {
-    await List.findOneAndDelete({ _id: req.params.id, owner: req.userId });
+    const { id } = req.params;
+    // only delete if owner matches
+    const deleted = await List.findOneAndDelete({ _id: id, owner: req.userId });
+    if (!deleted) {
+      return res.status(404).json({ message: 'List not found or not yours' });
+    }
     res.json({ message: 'List deleted' });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 };
