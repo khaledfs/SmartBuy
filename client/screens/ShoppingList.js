@@ -1,12 +1,24 @@
 // client/screens/ShoppingList.js
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, Button, TouchableOpacity,
-  StyleSheet, ScrollView, Image
+  View,
+  Text,
+  TextInput,
+  Button,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ICON_SIZE = 80;
+const ICON_CONTAINER_WIDTH = SCREEN_WIDTH / 3 - 30; // ~3 per row
+const LABEL_FONT_SIZE = 14;
 
 export default function ShoppingList({ navigation, route }) {
   const { newBasket, listId, listName } = route.params || {};
@@ -19,28 +31,23 @@ export default function ShoppingList({ navigation, route }) {
       const token = await AsyncStorage.getItem('token');
       if (!token) return navigation.replace('Login');
 
-      // always fetch suggestions:
+      // fetch full product list (with price)
       const { data: s } = await api.get('/suggestions');
       setSuggestions(s);
 
+      // decide which list to load
       if (newBasket) {
-        // 🚀 brand-new basket → start empty
         setItems([]);
-      }
-      else if (listId) {
-        // editing a saved list
+      } else if (listId) {
         const { data: list } = await api.get(`/lists/${listId}`);
         setItems(list.items);
       } else {
-        // normal “shopping basket” mode
         const { data: lst } = await api.get('/list');
         setItems(lst);
       }
     };
     init();
   }, [newBasket, listId, navigation]);
-
-  // … rest of your add/delete handlers unchanged …
 
   const handleAddItem = async (name) => {
     try {
@@ -66,32 +73,40 @@ export default function ShoppingList({ navigation, route }) {
   };
 
   const renderGroupedSuggestions = () => {
+    // group by category and filter by search term
     const grouped = suggestions.reduce((acc, suggestion) => {
-      const nameLower = suggestion.name?.en?.toLowerCase?.();
+      const nameLower = suggestion.name?.en?.toLowerCase();
       if (!nameLower) return acc;
-      const search = item.toLowerCase();
-      if (nameLower.startsWith(search)) {
-        if (!acc[suggestion.category]) acc[suggestion.category] = [];
-        acc[suggestion.category].push(suggestion);
-      }
+      if (!nameLower.startsWith(item.toLowerCase())) return acc;
+      if (!acc[suggestion.category]) acc[suggestion.category] = [];
+      acc[suggestion.category].push(suggestion);
       return acc;
     }, {});
 
-    return Object.entries(grouped).map(([category, items]) => (
+    return Object.entries(grouped).map(([category, prods]) => (
       <View key={category} style={styles.card}>
         <Text style={styles.cardTitle}>{category}</Text>
-        <View style={styles.iconRow}>
-          {items.map((i) => (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        >
+          {prods.map((p) => (
             <TouchableOpacity
-              key={i.key}
+              key={p.key}
               style={styles.iconContainer}
-              onPress={() => handleAddItem(i.name.en)}
+              onPress={() => handleAddItem(p.name.en)}
             >
-              <Image source={{ uri: i.icon.light }} style={styles.icon} />
-              <Text style={styles.iconLabel}>{i.name.en}</Text>
+              <Image source={{ uri: p.icon.light }} style={styles.icon} />
+              <Text style={styles.iconLabel} numberOfLines={1}>
+                {p.name.en}
+              </Text>
+              <Text style={styles.priceLabel}>
+                ₪{p.price?.toFixed(2) ?? '–'}
+              </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       </View>
     ));
   };
@@ -132,13 +147,16 @@ export default function ShoppingList({ navigation, route }) {
         autoCorrect={false}
       />
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView style={styles.suggestionArea}>
         <Text style={styles.subtitle}>Suggestions</Text>
         {renderGroupedSuggestions()}
       </ScrollView>
 
       <View style={styles.footer}>
-        <Button title="Back to Main Screen" onPress={() => navigation.navigate('Main')} />
+        <Button
+          title="Back to Main Screen"
+          onPress={() => navigation.navigate('Main')}
+        />
         <View style={{ marginTop: 10 }} />
         <Button title="Logout" onPress={logout} color="red" />
       </View>
@@ -148,42 +166,54 @@ export default function ShoppingList({ navigation, route }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16 },
-  subtitle: { fontSize: 20, fontWeight: 'bold', marginTop: 16, marginBottom: 8 },
-  input: {
-    borderColor: '#ccc',
-    borderWidth: 1,
-    padding: 10,
-    marginBottom: 10,
-    borderRadius: 5,
-  },
-  footer: { marginTop: 6 },
-  card: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 10,
-    marginRight: 12,
-    marginBottom: 20,
-  },
-  cardTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
-  iconRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-  },
-  iconContainer: { alignItems: 'center', width: 80, marginBottom: 12 },
-  icon: { width: 40, height: 40, marginBottom: 4 },
-  iconLabel: { fontSize: 12, textAlign: 'center' },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
   },
-  basketIcon: {
-    padding: 8,
-    position: 'relative',
+  title: { fontSize: 24, fontWeight: 'bold' },
+  input: {
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 10,
+    marginBottom: 10,
   },
+  suggestionArea: { flex: 1, marginBottom: 10 },
+  subtitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
+  card: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  cardTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
+  horizontalList: {
+    alignItems: 'flex-start',
+  },
+  iconContainer: {
+    width: ICON_CONTAINER_WIDTH,
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  icon: {
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  iconLabel: {
+    fontSize: LABEL_FONT_SIZE,
+    textAlign: 'center',
+  },
+  priceLabel: {
+    marginTop: 2,
+    fontSize: LABEL_FONT_SIZE,
+    fontWeight: '600',
+    color: '#333',
+  },
+  basketIcon: { padding: 8, position: 'relative' },
   badge: {
     position: 'absolute',
     top: 2,
@@ -193,9 +223,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1,
   },
-  badgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
+  badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+  footer: { marginTop: 6 },
 });
