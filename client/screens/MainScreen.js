@@ -176,7 +176,7 @@ const handleDeleteList = (id) => {
           onPress={() => {
             // just reset edit mode and open a brand‐new basket
             setIsEditing(false);
-            navigation.navigate('ShoppingList', { newBasket: true });
+            navigation.navigate('beforeShopping', { newBasket: true });
           }}
         >
           <Text style={styles.buttonText}>CREATE LIST</Text>
