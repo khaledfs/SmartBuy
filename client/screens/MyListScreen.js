@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { Checkbox } from 'react-native-paper';
+import { Swipeable } from 'react-native-gesture-handler';
 
 export default function MyListScreen({ navigation, route }) {
   const {
@@ -32,6 +32,37 @@ export default function MyListScreen({ navigation, route }) {
   const [selected, setSelected] = useState({});
   const [modalVisible, setModalVisible] = useState(false);
   const [listName, setListName] = useState(initialName || '');
+useEffect(() => {
+  navigation.setOptions({
+    headerRight: () => (
+      <TouchableOpacity
+        onPress={() => {
+          Alert.alert(
+            'Logout',
+            'Are you sure you want to logout?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: async () => {
+                  await AsyncStorage.removeItem('token');
+                  navigation.replace('Login');
+                }
+              }
+            ]
+          );
+        }}
+        style={{ marginRight: 16 }}
+      >
+        <Image
+          source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
+          style={{ width: 24, height: 24 }}
+        />
+      </TouchableOpacity>
+    )
+  });
+}, [navigation]);
 
   // load suggestion icons
   useEffect(() => {
@@ -72,55 +103,7 @@ export default function MyListScreen({ navigation, route }) {
     return Object.values(m);
   }, [rawItems, suggestions]);
 
-  // toggle selection of a group
-  const handleToggle = name => {
-    setSelected(prev => ({ ...prev, [name]: !prev[name] }));
-  };
-
-  // select all
-  const selectAll = () => {
-    const all = {};
-    groupedItems.forEach(g => (all[g.name] = true));
-    setSelected(all);
-  };
-
-  // bulk delete selected
-  const deleteSelected = () => {
-    const toDelete = Object.keys(selected).filter(n => selected[n]);
-    if (!toDelete.length) return;
-    Alert.alert(
-      'Delete Items',
-      `Delete ${toDelete.length} group(s)?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // delete each raw item
-              for (let name of toDelete) {
-                const grp = groupedItems.find(g => g.name === name);
-                for (let id of grp.ids) {
-                  if (onDelete) await onDelete(id);
-                  else await api.delete(`/list/${id}`);
-                }
-              }
-              // update state
-              setRawItems(prev => prev.filter(i => !toDelete.includes(i.name)));
-              setSelected({});
-              if (updateParentItems) {
-                updateParentItems(rawItems.filter(i => !toDelete.includes(i.name)));
-              }
-            } catch (err) {
-              console.error(err);
-            }
-          },
-        },
-      ]
-    );
-  };
-
+  
   // save or update list
   const handleSaveList = async () => {
     if (!listName.trim()) {
@@ -140,6 +123,36 @@ export default function MyListScreen({ navigation, route }) {
       Alert.alert('Error', 'Could not save list.');
     }
   };
+const renderSwipeActions = (group) => (
+  <TouchableOpacity
+    style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', width: 70 }}
+    onPress={async () => {
+  try {
+    for (let id of group.ids) {
+      if (onDelete) await onDelete(id);
+      else await api.delete(`/list/${id}`);
+    }
+    setRawItems(prev => prev.filter(i => !group.ids.includes(i._id)));
+
+    // ✅ Clear selection state for this group
+    setSelected(prev => {
+      const updated = { ...prev };
+      delete updated[group.name];
+      return updated;
+    });
+
+    if (updateParentItems) {
+      updateParentItems(rawItems.filter(i => !group.ids.includes(i._id)));
+    }
+  } catch (err) {
+    console.error('Swipe delete error:', err);
+  }
+}}
+
+  >
+    <Icon name="trash-outline" size={24} color="#fff" />
+  </TouchableOpacity>
+);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -148,16 +161,7 @@ export default function MyListScreen({ navigation, route }) {
         <Text style={styles.title}>
           {listId ? `Editing: ${listName}` : '🧾 My Shopping List'}
         </Text>
-        {Object.values(selected).some(Boolean) && (
-          <View style={styles.bulkRow}>
-            <TouchableOpacity onPress={selectAll} style={styles.bulkBtn}>
-              <Text style={styles.bulkText}>Select All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={deleteSelected} style={styles.bulkBtn}>
-              <Icon name="trash-outline" size={24} color="red" />
-            </TouchableOpacity>
-          </View>
-        )}
+        
       </View>
 
       {/* Grouped list */}
@@ -165,33 +169,33 @@ export default function MyListScreen({ navigation, route }) {
         data={groupedItems}
         keyExtractor={g => g.name}
         renderItem={({ item: g }) => (
-          <View style={styles.itemRow}>
-            <Checkbox
-              status={selected[g.name] ? 'checked' : 'unchecked'}
-              onPress={() => handleToggle(g.name)}
-            />
-            {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
-            <Text style={styles.itemText}>{g.name}</Text>
-            {g.count > 1 && (
-              <View style={styles.countBadge}>
-                <Text style={styles.countText}>×{g.count}</Text>
-              </View>
-            )}
-          </View>
-        )}
+  <Swipeable renderRightActions={() => renderSwipeActions(g)}>
+    <View style={styles.itemRow}>
+      {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
+      <Text style={styles.itemText}>{g.name}</Text>
+      {g.count > 1 && (
+        <View style={styles.countBadge}>
+          <Text style={styles.countText}>×{g.count}</Text>
+        </View>
+      )}
+    </View>
+  </Swipeable>
+)}
+
         ListEmptyComponent={<Text style={styles.empty}>No items.</Text>}
       />
 
       {/* Footer */}
       <View style={styles.footer}>
-        <Button title="Save List" onPress={() => setModalVisible(true)} />
-        <View style={{ height: 10 }} />
-        <Button
-          title="Rename List"
-          color="#FF9800"
-          onPress={() => setModalVisible(true)}
-        />
-      </View>
+  {!listId && (
+    <>
+      <Button title="Save List" onPress={() => setModalVisible(true)} />
+      <View style={{ height: 10 }} />
+    </>
+  )}
+  
+</View>
+
 
       {/* Rename/Save Modal */}
       <Modal

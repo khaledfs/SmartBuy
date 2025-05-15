@@ -8,6 +8,7 @@ import {
   FlatList,
   TouchableOpacity,
   Modal,
+  Image,
   TextInput,
   SafeAreaView,
   Alert
@@ -31,6 +32,37 @@ export default function MainScreen({ navigation }) {
       console.error('Fetch lists error:', err);
     }
   };
+useEffect(() => {
+  navigation.setOptions({
+    headerRight: () => (
+      <TouchableOpacity
+        onPress={() => {
+          Alert.alert(
+            'Logout',
+            'Are you sure you want to logout?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: async () => {
+                  await AsyncStorage.removeItem('token');
+                  navigation.replace('Login');
+                }
+              }
+            ]
+          );
+        }}
+        style={{ marginRight: 16 }}
+      >
+        <Image
+          source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
+          style={{ width: 24, height: 24 }}
+        />
+      </TouchableOpacity>
+    )
+  });
+}, [navigation]);
 
   // Check auth and initial load
   useEffect(() => {
@@ -174,9 +206,7 @@ const handleDeleteList = (id) => {
         renderItem={({ item }) => <Text style={styles.item}>- {item.name}</Text>}
       />
 
-      <View>
-        <Button title="LOGOUT" color="red" onPress={logout} />
-      </View>
+      
 
       {/* Rename List Modal */}
       <Modal

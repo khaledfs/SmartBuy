@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
+  Alert,
   TextInput,
   Button,
   TouchableOpacity,
@@ -25,6 +26,37 @@ export default function ShoppingList({ navigation, route }) {
   const [item, setItem] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
+useEffect(() => {
+  navigation.setOptions({
+    headerRight: () => (
+      <TouchableOpacity
+        onPress={() => {
+          Alert.alert(
+            'Logout',
+            'Are you sure you want to logout?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: async () => {
+                  await AsyncStorage.removeItem('token');
+                  navigation.replace('Login');
+                }
+              }
+            ]
+          );
+        }}
+        style={{ marginRight: 16 }}
+      >
+        <Image
+          source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
+          style={{ width: 24, height: 24 }}
+        />
+      </TouchableOpacity>
+    )
+  });
+}, [navigation]);
 
   useEffect(() => {
     const init = async () => {
@@ -48,25 +80,30 @@ export default function ShoppingList({ navigation, route }) {
     };
     init();
   }, [newBasket, listId, navigation]);
-
-  const handleAddItem = async (name) => {
-  // Find the full product object from suggestions by matching name
+const handleAddItem = async (name) => {
   const product = suggestions.find(p => p.name.en === name);
-  if (!product) {
-    console.error('❌ Product not found in suggestions:', name);
-    return;
-  }
+  if (!product) return;
 
   try {
     const res = await api.post('/list', {
       name: product.name.en,
       icon: product.icon.light,
-      productId: product._id  // ✅ critical for linking to actual Product
+      productId: product._id
     });
 
-    setItems([res.data, ...items]);
+    const newItem = res.data;
+    const updated = [newItem, ...items];
+    setItems(updated);
+
+    // ✅ Auto-save if editing an existing list
+    if (listId) {
+      await api.patch(`/lists/${listId}`, {
+        name: listName || 'Unnamed List',
+        items: updated.map(i => i._id)
+      });
+    }
   } catch (error) {
-    console.error('❌ Add item error:', error.message);
+    console.error('Add + save error:', error.message);
   }
 };
 
@@ -171,7 +208,6 @@ export default function ShoppingList({ navigation, route }) {
           onPress={() => navigation.navigate('Main')}
         />
         <View style={{ marginTop: 10 }} />
-        <Button title="Logout" onPress={logout} color="red" />
       </View>
     </View>
   );
