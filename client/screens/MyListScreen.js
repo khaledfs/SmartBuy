@@ -17,6 +17,7 @@ import {
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Swipeable } from 'react-native-gesture-handler';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function MyListScreen({ navigation, route }) {
   const {
@@ -29,49 +30,47 @@ export default function MyListScreen({ navigation, route }) {
 
   const [rawItems, setRawItems] = useState(parentItems || []);
   const [suggestions, setSuggestions] = useState([]);
-  const [selected, setSelected] = useState({});
   const [modalVisible, setModalVisible] = useState(false);
   const [listName, setListName] = useState(initialName || '');
-useEffect(() => {
-  navigation.setOptions({
-    headerRight: () => (
-      <TouchableOpacity
-        onPress={() => {
-          Alert.alert(
-            'Logout',
-            'Are you sure you want to logout?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: async () => {
-                  await AsyncStorage.removeItem('token');
-                  navigation.replace('Login');
-                }
-              }
-            ]
-          );
-        }}
-        style={{ marginRight: 16 }}
-      >
-        <Image
-          source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
-          style={{ width: 24, height: 24 }}
-        />
-      </TouchableOpacity>
-    )
-  });
-}, [navigation]);
 
-  // load suggestion icons
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Logout',
+              'Are you sure you want to logout?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Logout',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await AsyncStorage.removeItem('token');
+                    navigation.replace('Login');
+                  },
+                },
+              ]
+            );
+          }}
+          style={{ marginRight: 16 }}
+        >
+          <Image
+            source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
+            style={{ width: 24, height: 24 }}
+          />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
   useEffect(() => {
     api.get('/suggestions')
       .then(res => setSuggestions(res.data))
       .catch(err => console.error(err));
   }, []);
 
-  // if editing existing and no parentItems passed, fetch
   useEffect(() => {
     if (listId && !parentItems) {
       api.get(`/lists/${listId}`)
@@ -83,7 +82,6 @@ useEffect(() => {
     }
   }, [listId, parentItems]);
 
-  // group duplicates by name
   const groupedItems = useMemo(() => {
     const m = {};
     rawItems.forEach(it => {
@@ -93,18 +91,48 @@ useEffect(() => {
           name: it.name,
           icon: sug?.icon.light,
           count: 1,
+          quantity: it.quantity || 1,
           ids: [it._id],
         };
       } else {
         m[it.name].count++;
+        m[it.name].quantity += it.quantity || 1;
         m[it.name].ids.push(it._id);
       }
     });
     return Object.values(m);
   }, [rawItems, suggestions]);
 
-  
-  // save or update list
+  const updateQuantity = async (itemId, newQuantity) => {
+  try {
+    const res = await api.patch(`/list/${itemId}`, { quantity: newQuantity });
+
+    // Update local state with new quantity
+    setRawItems(prev =>
+      prev.map(i =>
+        i._id === itemId ? { ...i, quantity: res.data.quantity } : i
+      )
+    );
+  } catch (err) {
+    console.error('Update quantity error:', err?.response?.data || err.message);
+  }
+};
+
+ 
+const handleIncrement = (group) => {
+  const targetId = group.ids[0];
+  const current = rawItems.find(i => i._id === targetId);
+  if (current) updateQuantity(targetId, current.quantity + 1);
+};
+
+const handleDecrement = (group) => {
+  const targetId = group.ids[0];
+  const current = rawItems.find(i => i._id === targetId);
+  if (current?.quantity > 1) {
+    updateQuantity(targetId, current.quantity - 1);
+  }
+};
+
   const handleSaveList = async () => {
     if (!listName.trim()) {
       Alert.alert('Invalid Name', 'Enter a valid list name.');
@@ -123,81 +151,66 @@ useEffect(() => {
       Alert.alert('Error', 'Could not save list.');
     }
   };
-const renderSwipeActions = (group) => (
-  <TouchableOpacity
-    style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', width: 70 }}
-    onPress={async () => {
-  try {
-    for (let id of group.ids) {
-      if (onDelete) await onDelete(id);
-      else await api.delete(`/list/${id}`);
-    }
-    setRawItems(prev => prev.filter(i => !group.ids.includes(i._id)));
 
-    // ✅ Clear selection state for this group
-    setSelected(prev => {
-      const updated = { ...prev };
-      delete updated[group.name];
-      return updated;
-    });
-
-    if (updateParentItems) {
-      updateParentItems(rawItems.filter(i => !group.ids.includes(i._id)));
-    }
-  } catch (err) {
-    console.error('Swipe delete error:', err);
-  }
-}}
-
-  >
-    <Icon name="trash-outline" size={24} color="#fff" />
-  </TouchableOpacity>
-);
+  const renderSwipeActions = (group) => (
+    <TouchableOpacity
+      style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', width: 70 }}
+      onPress={async () => {
+        try {
+          for (let id of group.ids) {
+            if (onDelete) await onDelete(id);
+            else await api.delete(`/list/${id}`);
+          }
+          setRawItems(prev => prev.filter(i => !group.ids.includes(i._id)));
+        } catch (err) {
+          console.error('Swipe delete error:', err);
+        }
+      }}
+    >
+      <Icon name="trash-outline" size={24} color="#fff" />
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header + bulk actions */}
       <View style={styles.headerRow}>
         <Text style={styles.title}>
           {listId ? `Editing: ${listName}` : '🧾 My Shopping List'}
         </Text>
-        
       </View>
 
-      {/* Grouped list */}
       <FlatList
         data={groupedItems}
         keyExtractor={g => g.name}
         renderItem={({ item: g }) => (
-  <Swipeable renderRightActions={() => renderSwipeActions(g)}>
-    <View style={styles.itemRow}>
-      {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
-      <Text style={styles.itemText}>{g.name}</Text>
-      {g.count > 1 && (
-        <View style={styles.countBadge}>
-          <Text style={styles.countText}>×{g.count}</Text>
-        </View>
-      )}
-    </View>
-  </Swipeable>
-)}
-
+          <Swipeable renderRightActions={() => renderSwipeActions(g)}>
+            <View style={styles.itemRow}>
+              {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
+              <Text style={styles.itemText}>{g.name}</Text>
+              <View style={styles.quantityControls}>
+                <TouchableOpacity  style={styles.qBtn}>
+                  <Text style={styles.qBtnText}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.qCountText}>{g.quantity}</Text>
+                <TouchableOpacity  style={styles.qBtn}>
+                  <Text style={styles.qBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Swipeable>
+        )}
         ListEmptyComponent={<Text style={styles.empty}>No items.</Text>}
       />
 
-      {/* Footer */}
       <View style={styles.footer}>
-  {!listId && (
-    <>
-      <Button title="Save List" onPress={() => setModalVisible(true)} />
-      <View style={{ height: 10 }} />
-    </>
-  )}
-  
-</View>
+        {!listId && (
+          <>
+            <Button title="Save List" onPress={() => setModalVisible(true)} />
+            <View style={{ height: 10 }} />
+          </>
+        )}
+      </View>
 
-
-      {/* Rename/Save Modal */}
       <Modal
         visible={modalVisible}
         transparent
@@ -233,10 +246,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   title: { fontSize: 24, fontWeight: 'bold' },
-  bulkRow: { flexDirection: 'row', alignItems: 'center' },
-  bulkBtn: { marginLeft: 12 },
-  bulkText: { color: '#2196F3', fontWeight: 'bold' },
-
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -248,19 +257,28 @@ const styles = StyleSheet.create({
   },
   icon: { width: 40, height: 40, marginRight: 12, borderRadius: 4 },
   itemText: { fontSize: 18, flex: 1 },
-  countBadge: {
-    backgroundColor: '#2196F3',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginLeft: 12,
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 10,
   },
-  countText: { color: '#fff', fontWeight: 'bold' },
-
+  qBtn: {
+    backgroundColor: '#eee',
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  qBtnText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  qCountText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginHorizontal: 8,
+  },
   empty: { textAlign: 'center', marginTop: 20, color: '#888' },
-
   footer: { marginTop: 20 },
-
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

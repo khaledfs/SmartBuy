@@ -50,7 +50,7 @@ useEffect(() => {
         style={{ marginRight: 16 }}
       >
         <Image
-          source={{ uri: 'https://img.icons8.com/?size=100&id=67651&format=png&color=000000' }}
+          source={{ uri: 'https://img.icons8.com/?size=100&id=arrojWw9F5j5&format=png&color=000000' }}
           style={{ width: 24, height: 24 }}
         />
       </TouchableOpacity>
