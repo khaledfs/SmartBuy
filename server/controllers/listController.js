@@ -85,27 +85,57 @@ exports.updateList = async (req, res) => {
 exports.deleteList = async (req, res) => {
   try {
     const { id } = req.params;
-    // only delete if owner matches
-    const deleted = await List.findOneAndDelete({ _id: id, owner: req.userId });
-    if (!deleted) {
+
+    // 1. Find the list by ID and owner
+    const list = await List.findOne({ _id: id, owner: req.userId });
+    if (!list) {
       return res.status(404).json({ message: 'List not found or not yours' });
     }
-    res.json({ message: 'List deleted' });
+
+    // 2. Delete all associated items
+    await Promise.all(list.items.map(itemId => Item.findByIdAndDelete(itemId)));
+
+    // 3. Delete the list itself
+    await List.deleteOne({ _id: id });
+
+    res.json({ message: 'List and its items deleted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// GET /api/lists/:id
-exports.getList = async (req, res) => {
+
+
+
+// POST /api/list → Add one item to user's current list
+exports.addItemToList = async (req, res) => {
+  const { name, productId, icon } = req.body;
+  console.log('📥 Adding item:', { name, productId, icon });
+
   try {
-    const { id } = req.params;
-    const list = await List.findOne({ _id: id, owner: req.userId }).populate('items');
-    if (!list) return res.status(404).json({ message: 'List not found' });
-    res.json(list);
+    const item = new Item({
+      name,
+      icon,
+      product: productId,   // ✅ this links item to the Product
+      quantity: 1,
+      addedBy: req.userId
+    });
+    await item.save();
+
+    // Attach to latest list (or create one if none exists)
+    let list = await List.findOne({ owner: req.userId }).sort({ createdAt: -1 });
+    if (!list) {
+      list = new List({ name: 'My List', owner: req.userId, items: [] });
+    }
+
+    list.items.push(item._id);
+    await list.save();
+    await item.populate('product');
+
+    res.status(201).json(item);
   } catch (err) {
+    console.error('❌ Failed to add item:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
-

@@ -9,5 +9,6 @@ router.get('/:id',    auth, ctl.getListById);    // ← new
 router.post('/',      auth, ctl.createList);
 router.patch('/:id',  auth, ctl.updateList);     // ← new
 router.delete('/:id', auth, ctl.deleteList);
+router.post('/list', auth, ctl.addItemToList);
 
 module.exports = router;

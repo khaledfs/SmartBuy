@@ -50,13 +50,26 @@ export default function ShoppingList({ navigation, route }) {
   }, [newBasket, listId, navigation]);
 
   const handleAddItem = async (name) => {
-    try {
-      const res = await api.post('/list', { name });
-      setItems([res.data, ...items]);
-    } catch (error) {
-      console.error('Add error:', error.message);
-    }
-  };
+  // Find the full product object from suggestions by matching name
+  const product = suggestions.find(p => p.name.en === name);
+  if (!product) {
+    console.error('❌ Product not found in suggestions:', name);
+    return;
+  }
+
+  try {
+    const res = await api.post('/list', {
+      name: product.name.en,
+      icon: product.icon.light,
+      productId: product._id  // ✅ critical for linking to actual Product
+    });
+
+    setItems([res.data, ...items]);
+  } catch (error) {
+    console.error('❌ Add item error:', error.message);
+  }
+};
+
 
   const handleDeleteItem = async (id) => {
     try {
