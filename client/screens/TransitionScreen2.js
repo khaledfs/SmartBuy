@@ -15,7 +15,7 @@ export default function TransitionScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <LottieView
-        source={require('../assets/animations/beforeMain.json')} // use your desired animation here
+        source={require('../assets/animations/beforeShopping.json')} // use your desired animation here
         autoPlay
         loop={false}
         style={styles.animation}
