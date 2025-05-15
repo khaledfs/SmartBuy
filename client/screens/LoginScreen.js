@@ -17,7 +17,7 @@ export default function LoginScreen({ navigation }) {
       await AsyncStorage.setItem('token', token);
       navigation.reset({
         index: 0,
-        routes: [{ name: 'Main' }],
+        routes: [{ name: 'beforeMain' }],
       });
     } catch (error) {
       Alert.alert(
@@ -33,7 +33,7 @@ export default function LoginScreen({ navigation }) {
       if (token) {
         navigation.reset({
           index: 0,
-          routes: [{ name: 'Main' }],
+          routes: [{ name: 'beforeMain' }],
         });
       }
     };

@@ -14,6 +14,7 @@ import {
   TextInput,
   SafeAreaView,
 } from 'react-native';
+import LottieView from 'lottie-react-native';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -104,34 +105,31 @@ export default function MyListScreen({ navigation, route }) {
   }, [rawItems, suggestions]);
 
   const updateQuantity = async (itemId, newQuantity) => {
-  try {
-    const res = await api.patch(`/list/${itemId}`, { quantity: newQuantity });
+    try {
+      const res = await api.patch(`/list/${itemId}`, { quantity: newQuantity });
+      setRawItems(prev =>
+        prev.map(i =>
+          i._id === itemId ? { ...i, quantity: res.data.quantity } : i
+        )
+      );
+    } catch (err) {
+      console.error('Update quantity error:', err?.response?.data || err.message);
+    }
+  };
 
-    // Update local state with new quantity
-    setRawItems(prev =>
-      prev.map(i =>
-        i._id === itemId ? { ...i, quantity: res.data.quantity } : i
-      )
-    );
-  } catch (err) {
-    console.error('Update quantity error:', err?.response?.data || err.message);
-  }
-};
+  const handleIncrement = (group) => {
+    const targetId = group.ids[0];
+    const current = rawItems.find(i => i._id === targetId);
+    if (current) updateQuantity(targetId, current.quantity + 1);
+  };
 
- 
-const handleIncrement = (group) => {
-  const targetId = group.ids[0];
-  const current = rawItems.find(i => i._id === targetId);
-  if (current) updateQuantity(targetId, current.quantity + 1);
-};
-
-const handleDecrement = (group) => {
-  const targetId = group.ids[0];
-  const current = rawItems.find(i => i._id === targetId);
-  if (current?.quantity > 1) {
-    updateQuantity(targetId, current.quantity - 1);
-  }
-};
+  const handleDecrement = (group) => {
+    const targetId = group.ids[0];
+    const current = rawItems.find(i => i._id === targetId);
+    if (current?.quantity > 1) {
+      updateQuantity(targetId, current.quantity - 1);
+    }
+  };
 
   const handleSaveList = async () => {
     if (!listName.trim()) {
@@ -188,18 +186,29 @@ const handleDecrement = (group) => {
               {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
               <Text style={styles.itemText}>{g.name}</Text>
               <View style={styles.quantityControls}>
-                <TouchableOpacity  style={styles.qBtn}>
+                <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
                   <Text style={styles.qBtnText}>−</Text>
                 </TouchableOpacity>
                 <Text style={styles.qCountText}>{g.quantity}</Text>
-                <TouchableOpacity  style={styles.qBtn}>
+                <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
                   <Text style={styles.qBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </Swipeable>
         )}
-        ListEmptyComponent={<Text style={styles.empty}>No items.</Text>}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <LottieView
+              source={require('../assets/animations/grocery.json')}
+              autoPlay
+              loop
+              style={styles.lottie}
+            />
+            <Text style={styles.emptyText}>Your list is empty</Text>
+            <Text style={styles.emptySubtext}>Add something tasty 🥦🍞🥛</Text>
+          </View>
+        }
       />
 
       <View style={styles.footer}>
@@ -300,4 +309,23 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalBtns: { flexDirection: 'row', justifyContent: 'space-around' },
+  emptyContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 50,
+  },
+  lottie: {
+    width: 200,
+    height: 200,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 4,
+  },
 });
