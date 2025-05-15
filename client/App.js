@@ -7,6 +7,7 @@ import ShoppingList from './screens/ShoppingList';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import MyListScreen from './screens/MyListScreen';
+import TransitionScreen from './screens/TransitionScreen';
 
 
 const Stack = createStackNavigator();
@@ -15,8 +16,9 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator initialRouteName="Login">
-        <Stack.Screen name="Login" component={LoginScreen} options={{ headerLeft: () => null}}/>
+        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }}/>
         <Stack.Screen name="Signup" component={SignupScreen} />
+        <Stack.Screen name="beforeMain" component={TransitionScreen} options={{ headerShown: false }}/>
         <Stack.Screen name="Main" component={MainScreen} />
         <Stack.Screen name="ShoppingList" component={ShoppingList} />
         <Stack.Screen name="MyList" component={MyListScreen} />
