@@ -39,6 +39,7 @@ app.use('/api/lists', require('./routes/listRoutes'));
 // suggestions (for autocomplete)
 app.use('/api/suggestions', require('./routes/suggestionRoutes'));
 
+app.use('/api/groups', require('./routes/groupRoutes'));
 // connect to Mongo
 mongoose
   .connect(process.env.MONGO_URI)

@@ -23,6 +23,16 @@ export default function MainScreen({ navigation }) {
   const [renameName, setRenameName] = useState('');
   const [listToRename, setListToRename] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [groups, setGroups] = useState([]);
+
+const fetchGroups = async () => {
+  try {
+    const res = await api.get('/groups/my');
+    setGroups(res.data);
+  } catch (err) {
+    console.error('Fetch groups error:', err);
+  }
+};
 
   const fetchLists = async () => {
     try {
@@ -32,6 +42,24 @@ export default function MainScreen({ navigation }) {
       console.error('Fetch lists error:', err);
     }
   };
+
+  useEffect(() => {
+  const checkSession = async () => {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) navigation.replace('Login');
+    else {
+      fetchLists();
+      fetchGroups(); // 🔄 add this
+    }
+  };
+  checkSession();
+}, []);
+
+useEffect(() => navigation.addListener('focus', () => {
+  fetchLists();
+  fetchGroups(); // 🔄 add this
+}), [navigation]);
+
 useEffect(() => {
   navigation.setOptions({
     headerRight: () => (
@@ -55,10 +83,8 @@ useEffect(() => {
         }}
         style={{ marginRight: 16 }}
       >
-        <Image
-          source={{ uri: 'https://img.icons8.com/?size=100&id=arrojWw9F5j5&format=png&color=000000' }}
-          style={{ width: 24, height: 24 }}
-        />
+       <Icon name="log-out-outline" size={34} color="#000" />
+
       </TouchableOpacity>
     )
   });
@@ -199,12 +225,27 @@ const handleDeleteList = (id) => {
         renderItem={renderItem}
       />
 
-      <Text style={styles.subtitle}>Previous Shoppings</Text>
-      <FlatList
-        data={[{ id: '3', name: 'Last Week' }, { id: '4', name: '2 Weeks Ago' }]}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => <Text style={styles.item}>- {item.name}</Text>}
-      />
+      <Text style={styles.subtitle}>My Groups</Text>
+<FlatList
+  data={groups}
+  keyExtractor={(item) => item._id}
+  renderItem={({ item }) => (
+    <Text style={styles.item}>• {item.name}</Text>
+  )}
+  ListEmptyComponent={<Text style={styles.item}>You don't belong to any group yet.</Text>}
+/>
+
+<TouchableOpacity
+  style={styles.groupButton}
+  onPress={() => navigation.navigate('GroupManager')}
+>
+  <Image
+    source={{ uri: 'https://img.icons8.com/ios-filled/50/groups.png' }}
+    style={{ width: 20, height: 20, marginRight: 8 }}
+  />
+  <Text style={styles.groupButtonText}>Manage Groups</Text>
+</TouchableOpacity>
+
 
       
 
@@ -253,4 +294,20 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
   modalInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, padding: 10, marginBottom: 20 },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-around' },
+  groupButton: {
+  marginTop: 20,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#4CAF50',
+  paddingVertical: 12,
+  paddingHorizontal: 16,
+  borderRadius: 6,
+},
+groupButtonText: {
+  color: '#fff',
+  fontWeight: 'bold',
+  fontSize: 16,
+},
+
 });

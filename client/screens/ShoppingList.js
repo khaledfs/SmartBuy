@@ -49,10 +49,8 @@ useEffect(() => {
         }}
         style={{ marginRight: 16 }}
       >
-        <Image
-          source={{ uri: 'https://img.icons8.com/?size=100&id=arrojWw9F5j5&format=png&color=000000' }}
-          style={{ width: 24, height: 24 }}
-        />
+               <Icon name="log-out-outline" size={34} color="#000" />
+        
       </TouchableOpacity>
     )
   });
@@ -85,27 +83,28 @@ const handleAddItem = async (name) => {
   if (!product) return;
 
   try {
-    const res = await api.post('/list', {
-      name: product.name.en,
-      icon: product.icon.light,
-      productId: product._id
-    });
-
-    const newItem = res.data;
-    const updated = [newItem, ...items];
-    setItems(updated);
-
-    // ✅ Auto-save if editing an existing list
+    let res;
     if (listId) {
-      await api.patch(`/lists/${listId}`, {
-        name: listName || 'Unnamed List',
-        items: updated.map(i => i._id)
+      res = await api.post(`/lists/${listId}/items`, {
+        name: product.name.en,
+        icon: product.icon.light,
+        productId: product._id
+      });
+    } else {
+      res = await api.post('/list', {
+        name: product.name.en,
+        icon: product.icon.light,
+        productId: product._id
       });
     }
+
+    const newItem = res.data;
+    setItems([newItem, ...items]);
   } catch (error) {
-    console.error('Add + save error:', error.message);
+    console.error('Add + save error:', error?.response?.data || error.message);
   }
 };
+
 
 
   const handleDeleteItem = async (id) => {

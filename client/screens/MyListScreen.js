@@ -57,10 +57,8 @@ export default function MyListScreen({ navigation, route }) {
           }}
           style={{ marginRight: 16 }}
         >
-          <Image
-            source={{ uri: 'https://img.icons8.com/?size=100&id=arrojWw9F5j5&format=png&color=000000' }}
-            style={{ width: 24, height: 24 }}
-          />
+                 <Icon name="log-out-outline" size={34} color="#000" />
+          
         </TouchableOpacity>
       ),
     });
