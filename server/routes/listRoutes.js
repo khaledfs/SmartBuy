@@ -14,12 +14,13 @@ router.get('/:id',    auth, ctl.getListById);
 router.post('/',      auth, ctl.createList);
 
 // Update list (name or items)
-router.put('/:id',    auth, ctl.updateList);
+router.patch('/:id', auth, ctl.updateList); 
 
 // Delete list
 router.delete('/:id', auth, ctl.deleteList);
 
 // Add item to a list
 router.post('/:id/items', auth, ctl.addItemToListById);
+
 
 module.exports = router;

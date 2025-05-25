@@ -1,20 +1,12 @@
-// client/screens/GroupManagerScreen.js
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  Button,
-  FlatList,
-  StyleSheet,
-  Alert,
-  Image,
-  TouchableOpacity
+  View, Text, TextInput, FlatList, StyleSheet, Alert,
+  Image, TouchableOpacity, ScrollView
 } from 'react-native';
-
 import api from '../services/api';
-import jwtDecode from 'jwt-decode';
+import { jwtDecode } from 'jwt-decode';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function GroupManagerScreen() {
   const [groups, setGroups] = useState([]);
@@ -24,40 +16,16 @@ export default function GroupManagerScreen() {
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const defaultAvatar = 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
 
-  // Load user ID from token first
- useEffect(() => {
-  const init = async () => {
-    
-    const token = await AsyncStorage.getItem('token');
-     
-    if (!token) {
-      console.warn('⚠️ No token found');
-      return;
-    }
-
-    const decoded = jwtDecode(token);
-    console.log("kokasdaosadasdas")
-    console.log('🔓 Decoded token in GroupManager:', decoded);
-    setCurrentUserId(decoded.id);
-    if (!decoded?.id) {
-        console.error('❌ Token decoded but missing id:', decoded);
-        }
-
-    // Wait until user ID is set before fetching groups
-   
-    fetchMyGroups();
-  };
-
-  init();
-}, []);
-
-  // Fetch groups once we know currentUserId
   useEffect(() => {
-    if (currentUserId) {
-      console.log('📥 Fetching groups for user:', currentUserId);
+    const init = async () => {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return;
+      const decoded = jwtDecode(token);
+      setCurrentUserId(decoded.id);
       fetchMyGroups();
-    }
-  }, [currentUserId]);
+    };
+    init();
+  }, []);
 
   const fetchMyGroups = async () => {
     try {
@@ -65,7 +33,7 @@ export default function GroupManagerScreen() {
       setGroups(res.data);
     } catch (err) {
       console.error('Fetch groups error:', err);
-      Alert.alert('Error fetching groups');
+      Alert.alert('Error', 'Failed to fetch groups');
     }
   };
 
@@ -85,37 +53,33 @@ export default function GroupManagerScreen() {
     if (!usernameToAdd || !selectedGroupId) return;
     try {
       await api.post(`/groups/${selectedGroupId}/addUser`, { username: usernameToAdd });
-      Alert.alert('User added!');
       setUsernameToAdd('');
       fetchMyGroups();
     } catch (err) {
-      console.error('Add user error:', err);
-      Alert.alert('Failed to add user. Make sure the username is correct.');
+      Alert.alert('Failed to add user');
     }
   };
 
-  const handleRemoveMember = async (groupId, memberId) => {
+  const handleRemove = async (groupId, memberId) => {
     try {
       await api.patch(`/groups/${groupId}/removeUser`, { userId: memberId });
       fetchMyGroups();
     } catch (err) {
-      console.error('Remove member error:', err);
-      Alert.alert('Failed to remove member');
+      Alert.alert('Failed to remove user');
     }
   };
 
-  const handleLeaveGroup = async (groupId) => {
+  const handleLeave = async (groupId) => {
     try {
       await api.post(`/groups/${groupId}/leave`);
       fetchMyGroups();
     } catch (err) {
-      console.error('Leave group error:', err?.response?.data || err.message);
-      Alert.alert('Failed to leave group');
+      Alert.alert('Cannot leave group');
     }
   };
 
-  const handleDeleteGroup = async (groupId) => {
-    Alert.alert('Confirm Delete', 'Are you sure you want to delete this group?', [
+  const handleDelete = async (groupId) => {
+    Alert.alert('Delete group?', '', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -125,183 +89,140 @@ export default function GroupManagerScreen() {
             await api.delete(`/groups/${groupId}`);
             fetchMyGroups();
           } catch (err) {
-            console.error('Delete group error:', err);
-            Alert.alert('Failed to delete group');
+            Alert.alert('Delete failed');
           }
         },
       },
     ]);
   };
 
-  const renderGroup = ({ item }) => {
-    console.log('Group admin:', item.admin._id, '| You:', currentUserId);
-
-    return (
-      <View style={styles.groupItem}>
-        <Text style={styles.groupName}>{item.name}</Text>
-
-        <View style={styles.adminRow}>
-          <Image
-            source={{ uri: item.admin?.profilePicUrl || defaultAvatar }}
-            style={styles.adminPic}
-          />
-          <Text style={styles.adminText}>Admin: {item.admin?.username || 'Unknown'}</Text>
+  const renderGroup = ({ item }) => (
+    <View style={styles.card}>
+      <View style={styles.row}>
+        <Image source={{ uri: item.admin?.profilePicUrl || defaultAvatar }} style={styles.avatar} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.groupTitle}>{item.name}</Text>
+          <Text style={styles.adminLabel}>Admin: {item.admin?.username}</Text>
         </View>
-
-        <View style={styles.memberRow}>
-          {item.members?.map((m) => (
-            <View key={m._id} style={{ alignItems: 'center', marginRight: 6 }}>
-              <Image
-                source={{ uri: m.profilePicUrl || defaultAvatar }}
-                style={styles.memberPic}
-              />
-              {String(item.admin._id) === String(currentUserId) && m._id !== currentUserId && (
-                <TouchableOpacity
-                  onPress={() => handleRemoveMember(item._id, m._id)}
-                  style={{ position: 'absolute', top: -4, right: -4 }}
-                >
-                  <Text style={{ fontSize: 10, color: 'red' }}>❌</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
-
-          {String(item.admin._id) === String(currentUserId) && (
-            <TouchableOpacity
-              style={styles.addMemberButton}
-              onPress={() => setSelectedGroupId(item._id)}
-            >
-              <Text style={styles.addMemberText}>+</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {item._id === selectedGroupId && (
-          <View style={styles.adminControls}>
-            <TextInput
-              placeholder="Username to add"
-              value={usernameToAdd}
-              onChangeText={setUsernameToAdd}
-              style={styles.input}
-            />
-            <Button title="Add Member" onPress={addUserToGroup} />
-          </View>
+        {String(item.admin._id) === String(currentUserId) ? (
+          <TouchableOpacity onPress={() => handleDelete(item._id)}>
+            <Icon name="trash-outline" size={22} color="red" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={() => handleLeave(item._id)}>
+            <Icon name="exit-outline" size={22} color="#555" />
+          </TouchableOpacity>
         )}
-
-        <View style={{ marginTop: 8 }}>
-          {String(item.admin._id) === String(currentUserId) ? (
-            <Button
-              title="🗑 Delete Group"
-              color="red"
-              onPress={() => handleDeleteGroup(item._id)}
-            />
-          ) : (
-            <Button
-              title="🚪 Leave Group"
-              onPress={() => handleLeaveGroup(item._id)}
-            />
-          )}
-        </View>
       </View>
-    );
-  };
+
+      <ScrollView horizontal contentContainerStyle={styles.membersRow}>
+        {item.members?.map((m) => (
+          <View key={m._id} style={styles.memberWrapper}>
+            <Image source={{ uri: m.profilePicUrl || defaultAvatar }} style={styles.memberAvatar} />
+            {String(item.admin._id) === String(currentUserId) && m._id !== currentUserId && (
+              <TouchableOpacity onPress={() => handleRemove(item._id, m._id)} style={styles.removeBadge}>
+                <Text style={{ fontSize: 10, color: 'white' }}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ))}
+        {String(item.admin._id) === String(currentUserId) && (
+          <TouchableOpacity style={styles.addMemberBtn} onPress={() => setSelectedGroupId(item._id)}>
+            <Icon name="person-add" size={18} />
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+
+      {item._id === selectedGroupId && (
+        <View style={styles.addUserRow}>
+          <TextInput
+            placeholder="Username to add"
+            value={usernameToAdd}
+            onChangeText={setUsernameToAdd}
+            style={styles.input}
+          />
+          <TouchableOpacity onPress={addUserToGroup} style={styles.confirmBtn}>
+            <Text style={styles.confirmText}>Add</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <Text style={styles.title}>My Groups</Text>
+
       <FlatList
         data={groups}
         keyExtractor={(item) => item._id}
         renderItem={renderGroup}
-        ListEmptyComponent={<Text>No groups found.</Text>}
+        scrollEnabled={false}
+        ListEmptyComponent={<Text style={{ textAlign: 'center' }}>No groups yet.</Text>}
       />
-      <Text style={styles.subtitle}>Create New Group</Text>
-      <TextInput
-        placeholder="Group Name"
-        value={groupName}
-        onChangeText={setGroupName}
-        style={styles.input}
-      />
-      <Button title="Create Group" onPress={createGroup} />
-    </View>
+
+     
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10
-  },
-  subtitle: {
-    marginTop: 20,
-    fontSize: 18,
-    fontWeight: '600'
-  },
-  input: {
-    borderWidth: 1,
-    padding: 8,
-    marginVertical: 8,
-    borderRadius: 5
-  },
-  groupItem: {
-    borderWidth: 1,
-    padding: 12,
-    borderRadius: 8,
+  container: { padding: 16, backgroundColor: '#fff' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16 },
+  card: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 10,
+    padding: 14,
     marginBottom: 12,
-    backgroundColor: '#fdfdfd'
+    elevation: 2,
   },
-  groupName: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8
+  row: { flexDirection: 'row', alignItems: 'center' },
+  avatar: { width: 36, height: 36, borderRadius: 18, marginRight: 10 },
+  groupTitle: { fontSize: 16, fontWeight: '600' },
+  adminLabel: { fontSize: 13, color: '#555' },
+  membersRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center' },
+  memberWrapper: { marginRight: 10, position: 'relative' },
+  memberAvatar: { width: 28, height: 28, borderRadius: 14 },
+  removeBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: 'red',
+    borderRadius: 8,
+    paddingHorizontal: 2,
+    paddingVertical: 1,
   },
-  adminRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8
-  },
-  adminPic: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    marginRight: 8
-  },
-  adminText: {
-    fontSize: 14,
-    fontWeight: '500'
-  },
-  memberRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 8
-  },
-  memberPic: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 6,
-    marginBottom: 6
-  },
-  adminControls: {
-    marginTop: 10
-  },
-  addMemberButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#ccc',
+  addMemberBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#ddd',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 6,
-    marginBottom: 6
   },
-  addMemberText: {
-    fontSize: 14,
-    fontWeight: 'bold'
-  }
+  addUserRow: { flexDirection: 'row', marginTop: 10, alignItems: 'center' },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 8,
+    borderRadius: 6,
+  },
+  confirmBtn: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginLeft: 10,
+  },
+  confirmText: { color: 'white', fontWeight: '600' },
+  createBox: { marginTop: 20 },
+  createBtn: {
+    backgroundColor: '#28a745',
+    padding: 12,
+    borderRadius: 6,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  createBtnText: { color: 'white', fontWeight: 'bold' },
 });

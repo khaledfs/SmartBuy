@@ -164,7 +164,7 @@ const handleAddItem = async (name) => {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>
-          {listName ? `Editing: ${listName}` : 'Shopping List'}
+          {listName ? `Editing: ${listName}` : ''}
         </Text>
         <TouchableOpacity
           style={styles.basketIcon}

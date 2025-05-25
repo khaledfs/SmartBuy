@@ -1,13 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/authMiddleware');
-const ctl = require('../controllers/groupController');
+const groupController = require('../controllers/groupController');
 
-router.post('/', auth, ctl.createGroup);
-router.get('/my', auth, ctl.getMyGroups);
-router.post('/:id/addUser', auth, ctl.addUserToGroup);
-router.patch('/:id/removeUser', auth, ctl.removeUser);
-router.post('/:id/leave', auth, ctl.leaveGroup);
-router.delete('/:id', auth, ctl.deleteGroup);
+// Create group + shared list
+router.post('/', auth, groupController.createGroup);
+
+// Get all groups this user belongs to
+router.get('/my', auth, groupController.getMyGroups);
+
+// Add user by username
+router.post('/:id/addUser', auth, groupController.addUserToGroup);
+
+// Remove a user from group (admin only)
+router.patch('/:id/removeUser', auth, groupController.removeUser);
+
+// Leave group (non-admin only)
+router.post('/:id/leave', auth, groupController.leaveGroup);
+
+// Delete group (admin only)
+router.delete('/:id', auth, groupController.deleteGroup);
 
 module.exports = router;

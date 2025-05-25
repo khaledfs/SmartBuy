@@ -1,22 +1,45 @@
 const Group = require('../models/Group');
 const User = require('../models/User');
+const List = require('../models/List');
 
+// POST /groups
 // POST /groups
 exports.createGroup = async (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ message: 'Group name is required' });
 
   try {
+    // Step 1: Create the group first
     const group = new Group({
       name,
       admin: req.userId,
-      members: [req.userId]
+      members: [req.userId],
     });
+
     await group.save();
-    const populated = await group.populate('admin members', 'username profilePicUrl');
+
+    // Step 2: Create a brand-new shared list (not reusing any)
+    const list = new List({
+      name: `${name}'s Shared List`,
+      owner: req.userId,
+      group: group._id,
+      items: [], // ✅ ensure it's completely empty
+    });
+
+    await list.save();
+
+    // Step 3: Link the new list back to the group
+    group.list = list._id;
+    await group.save();
+
+    // Step 4: Return populated group
+    const populated = await Group.findById(group._id)
+      .populate('admin members', 'username profilePicUrl')
+      .populate({ path: 'list', populate: { path: 'items' } });
+
     res.status(201).json(populated);
   } catch (err) {
-    console.error('Error creating group:', err);
+    console.error('❌ Error creating group:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -25,7 +48,11 @@ exports.createGroup = async (req, res) => {
 exports.getMyGroups = async (req, res) => {
   try {
     const groups = await Group.find({ members: req.userId })
-      .populate('admin members', 'username profilePicUrl');
+      .populate('admin members', 'username profilePicUrl')
+      .populate({
+        path: 'list',
+        populate: { path: 'items' }
+      });
     res.json(groups);
   } catch (err) {
     console.error('Error fetching groups:', err);
@@ -55,7 +82,11 @@ exports.addUserToGroup = async (req, res) => {
 
     group.members.push(user._id);
     await group.save();
-    const updated = await Group.findById(id).populate('admin members', 'username profilePicUrl');
+
+    const updated = await Group.findById(id)
+      .populate('admin members', 'username profilePicUrl')
+      .populate({ path: 'list', populate: { path: 'items' } });
+
     res.json(updated);
   } catch (err) {
     console.error('Add user error:', err);
@@ -82,7 +113,11 @@ exports.removeUser = async (req, res) => {
 
     group.members = group.members.filter(m => m.toString() !== userId);
     await group.save();
-    const updated = await Group.findById(id).populate('admin members', 'username profilePicUrl');
+
+    const updated = await Group.findById(id)
+      .populate('admin members', 'username profilePicUrl')
+      .populate({ path: 'list', populate: { path: 'items' } });
+
     res.json(updated);
   } catch (err) {
     console.error('Remove user error:', err);
@@ -103,6 +138,7 @@ exports.leaveGroup = async (req, res) => {
 
     group.members = group.members.filter(m => m.toString() !== req.userId);
     await group.save();
+
     res.json({ message: 'Left group successfully' });
   } catch (err) {
     console.error('Leave group error:', err);
@@ -121,8 +157,10 @@ exports.deleteGroup = async (req, res) => {
       return res.status(403).json({ message: 'Only admin can delete the group' });
     }
 
+    await List.findByIdAndDelete(group.list); // ✅ delete attached shared list
     await group.deleteOne();
-    res.json({ message: 'Group deleted successfully' });
+
+    res.json({ message: 'Group and shared list deleted successfully' });
   } catch (err) {
     console.error('Delete group error:', err);
     res.status(500).json({ message: 'Server error' });

@@ -5,12 +5,10 @@ const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     phone:    { type: String, required: true, unique: true, trim: true },
-    password: { type: String, required: true }
+    password: { type: String, required: true },
+    profilePicUrl: { type: String, default: '' } // ✅ New field
   },
   { timestamps: true }
 );
-
-// Optional—makes sure an index is in place even if `unique:true` is missed
-// userSchema.index({ phone: 1 }, { unique: true });
 
 module.exports = mongoose.model('User', userSchema);

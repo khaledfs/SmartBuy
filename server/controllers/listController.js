@@ -1,15 +1,30 @@
 const List = require('../models/List');
 const Item = require('../models/Item');
-const Group = require('../models/Group'); // 🔄 new: import Group
+const Group = require('../models/Group');
 
-// GET all this user’s lists
+// 🔁 REUSABLE access-check helper
+async function authorizeListAccess(listId, userId) {
+  const list = await List.findById(listId).populate('group');
+  if (
+    !list ||
+    (
+      list.owner.toString() !== userId &&
+      !(list.group && list.group.members.some(m => m.toString() === userId))
+    )
+  ) {
+    return null;
+  }
+  return list;
+}
+
+// GET all this user’s lists (owned + shared)
 exports.getLists = async (req, res) => {
   try {
     const ownedLists = await List.find({ owner: req.userId }).populate('items');
     const groupLists = await List.find({ group: { $ne: null } })
       .populate('items group')
       .where('group')
-      .in(await Group.find({ members: req.userId }).distinct('_id')); // 🔄 fetch group lists
+      .in(await Group.find({ members: req.userId }).distinct('_id'));
 
     res.json([...ownedLists, ...groupLists]);
   } catch (err) {
@@ -17,34 +32,32 @@ exports.getLists = async (req, res) => {
   }
 };
 
-// GET a single list by id
+// GET /lists/:id
 exports.getListById = async (req, res) => {
   try {
-    const list = await List.findById(req.params.id).populate('items group');
-    if (
-      !list ||
-      (list.owner.toString() !== req.userId &&
-        !(list.group && list.group.members.includes(req.userId)))
-    ) {
-      return res.status(404).json({ message: 'List not found or access denied' });
-    }
+    const list = await authorizeListAccess(req.params.id, req.userId);
+    if (!list) return res.status(403).json({ message: 'Access denied' });
+    await list.populate('items');
     res.json(list);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// POST (create) a new list
+// POST /lists
 exports.createList = async (req, res) => {
-  const { name, items, group } = req.body; // 🔄 optional group
+  const { name, items, group } = req.body;
   if (!name) return res.status(400).json({ message: 'List name is required' });
 
   try {
-    // 🔄 if group is given, check if user is a member
+    // Check group membership and prevent duplicates
     if (group) {
       const g = await Group.findById(group);
       if (!g || !g.members.includes(req.userId)) {
         return res.status(403).json({ message: 'Not authorized to create list in this group' });
+      }
+      if (g.list) {
+        return res.status(400).json({ message: 'This group already has a shared list' });
       }
     }
 
@@ -63,20 +76,14 @@ exports.createList = async (req, res) => {
   }
 };
 
+// PATCH /lists/:id
 exports.updateList = async (req, res) => {
   const { id } = req.params;
   const { name, items } = req.body;
 
   try {
-    const list = await List.findById(id).populate('group');
-
-    if (
-      !list ||
-      (list.owner.toString() !== req.userId &&
-        !(list.group && list.group.members.includes(req.userId)))
-    ) {
-      return res.status(404).json({ message: 'List not found or access denied' });
-    }
+    const list = await authorizeListAccess(id, req.userId);
+    if (!list) return res.status(403).json({ message: 'Access denied' });
 
     if (Array.isArray(items)) {
       const newIds = items.map(i => i.toString());
@@ -96,22 +103,14 @@ exports.updateList = async (req, res) => {
   }
 };
 
-// DELETE a list
+// DELETE /lists/:id
 exports.deleteList = async (req, res) => {
   try {
-    const { id } = req.params;
-    const list = await List.findById(id).populate('group');
-
-    if (
-      !list ||
-      (list.owner.toString() !== req.userId &&
-        !(list.group && list.group.members.includes(req.userId)))
-    ) {
-      return res.status(404).json({ message: 'List not found or not yours' });
-    }
+    const list = await authorizeListAccess(req.params.id, req.userId);
+    if (!list) return res.status(403).json({ message: 'Access denied' });
 
     await Promise.all(list.items.map(itemId => Item.findByIdAndDelete(itemId)));
-    await List.deleteOne({ _id: id });
+    await List.deleteOne({ _id: list._id });
 
     res.json({ message: 'List and its items deleted successfully' });
   } catch (err) {
@@ -120,9 +119,9 @@ exports.deleteList = async (req, res) => {
   }
 };
 
-// POST /api/list → Add one item to user's current list
+// POST /api/list → Add item to latest personal list OR by listId
 exports.addItemToList = async (req, res) => {
-  const { name, productId, icon, listId } = req.body; // 🔄 allow specifying listId
+  const { name, productId, icon, listId } = req.body;
   console.log('📥 Adding item:', { name, productId, icon });
 
   try {
@@ -137,18 +136,13 @@ exports.addItemToList = async (req, res) => {
 
     let list;
     if (listId) {
-      list = await List.findById(listId).populate('group');
-      if (
-        !list ||
-        (list.owner.toString() !== req.userId &&
-          !(list.group && list.group.members.includes(req.userId)))
-      ) {
-        return res.status(403).json({ message: 'Not allowed to modify this list' });
-      }
+      list = await authorizeListAccess(listId, req.userId);
+      if (!list) return res.status(403).json({ message: 'Access denied' });
     } else {
       list = await List.findOne({ owner: req.userId }).sort({ createdAt: -1 });
       if (!list) {
         list = new List({ name: 'My List', owner: req.userId, items: [] });
+        await list.save();
       }
     }
 
@@ -163,7 +157,7 @@ exports.addItemToList = async (req, res) => {
   }
 };
 
-// POST /api/lists/:id/items → Add one item to a specific list
+// POST /lists/:id/items → Add to specific list
 exports.addItemToListById = async (req, res) => {
   const { name, productId, icon } = req.body;
   const listId = req.params.id;
@@ -179,14 +173,8 @@ exports.addItemToListById = async (req, res) => {
     });
     await item.save();
 
-    const list = await List.findById(listId).populate('group');
-    if (
-      !list ||
-      (list.owner.toString() !== req.userId &&
-        !(list.group && list.group.members.includes(req.userId)))
-    ) {
-      return res.status(403).json({ message: 'Not allowed to modify this list' });
-    }
+    const list = await authorizeListAccess(listId, req.userId);
+    if (!list) return res.status(403).json({ message: 'Access denied' });
 
     list.items.push(item._id);
     await list.save();
@@ -198,5 +186,3 @@ exports.addItemToListById = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
-

@@ -1,273 +1,141 @@
-// client/screens/MainScreen.js
 import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  Button,
   StyleSheet,
   FlatList,
   TouchableOpacity,
   Modal,
-  Image,
   TextInput,
   SafeAreaView,
-  Alert
+  Alert,
+  Button,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MainScreen({ navigation }) {
-  const [lists, setLists] = useState([]);
-  const [renameModalVisible, setRenameModalVisible] = useState(false);
-  const [renameName, setRenameName] = useState('');
-  const [listToRename, setListToRename] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
+  const insets = useSafeAreaInsets();
   const [groups, setGroups] = useState([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
 
-const fetchGroups = async () => {
-  try {
-    const res = await api.get('/groups/my');
-    setGroups(res.data);
-  } catch (err) {
-    console.error('Fetch groups error:', err);
-  }
-};
-
-  const fetchLists = async () => {
+  const fetchGroups = async () => {
     try {
-      const res = await api.get('/lists');
-      setLists(res.data);
+      const res = await api.get('/groups/my');
+      setGroups(res.data);
     } catch (err) {
-      console.error('Fetch lists error:', err);
+      console.error('Fetch groups error:', err);
     }
   };
 
-  useEffect(() => {
-  const checkSession = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) navigation.replace('Login');
-    else {
-      fetchLists();
-      fetchGroups(); // 🔄 add this
-    }
-  };
-  checkSession();
-}, []);
-
-useEffect(() => navigation.addListener('focus', () => {
-  fetchLists();
-  fetchGroups(); // 🔄 add this
-}), [navigation]);
-
-useEffect(() => {
-  navigation.setOptions({
-    headerRight: () => (
-      <TouchableOpacity
-        onPress={() => {
-          Alert.alert(
-            'Logout',
-            'Are you sure you want to logout?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: async () => {
-                  await AsyncStorage.removeItem('token');
-                  navigation.replace('Login');
-                }
-              }
-            ]
-          );
-        }}
-        style={{ marginRight: 16 }}
-      >
-       <Icon name="log-out-outline" size={34} color="#000" />
-
-      </TouchableOpacity>
-    )
-  });
-}, [navigation]);
-
-  // Check auth and initial load
   useEffect(() => {
     const checkSession = async () => {
       const token = await AsyncStorage.getItem('token');
       if (!token) navigation.replace('Login');
-      else fetchLists();
+      else fetchGroups();
     };
     checkSession();
   }, []);
 
-  // Re-fetch on focus
-  useEffect(() => navigation.addListener('focus', fetchLists), [navigation]);
-
-  const logout = async () => {
-    await AsyncStorage.removeItem('token');
-    navigation.replace('Login');
-  };
-
-  const openRenameModal = (list) => {
-    setListToRename(list);
-    setRenameName(list.name);
-    setRenameModalVisible(true);
-  };
-
-  const handleRename = async () => {
-    if (!renameName.trim()) return Alert.alert('Invalid Name', 'Please enter a valid list name.');
-    try {
-      await api.patch(`/lists/${listToRename._id}`, { name: renameName.trim() });
-      setRenameModalVisible(false);
-      fetchLists();
-    } catch (err) {
-      console.error('Rename error:', err);
-      Alert.alert('Error', 'Could not rename list. Please try again.');
-    }
-  };
-
-  const handleEditList = (list) => {
-  setIsEditing(false);
-  navigation.navigate('ShoppingList', {
-    listId: list._id,
-    listName: list.name,
-  });
-};
-
-const handleDeleteList = (id) => {
-    Alert.alert(
-      'Delete List',
-      'Are you sure you want to delete this list?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete(`/lists/${id}`);
-              // drop it locally
-              setLists(ls => ls.filter(l => l._id !== id));
-            } catch (err) {
-              console.error('Delete list error:', err);
-              Alert.alert('Error', 'Couldn’t delete list. Try again.');
-            }
-          }
-        }
-      ]
-    );
-  };
-  
-
-  const renderItem = ({ item }) => (
-    <View style={styles.listRow}>
-      {isEditing ? (
-        <>
-          {/* Tapping the name enters item-editing */}
-          <TouchableOpacity onPress={() => handleEditList(item)} style={styles.listButton}>
-            <Text style={styles.item}>• {item.name}</Text>
-          </TouchableOpacity>
-  
-          {/* Only in edit mode: delete icon */}
-          <TouchableOpacity
-            onPress={() => handleDeleteList(item._id)}
-            style={styles.iconButton}
-          >
-            <Icon name="trash-outline" size={20} color="red" />
-          </TouchableOpacity>
-        </>
-      ) : (
-        <>
-          {/* Normal mode: just display name + rename icon */}
-          <Text style={styles.item}>- {item.name}</Text>
-          <TouchableOpacity
-            onPress={() => openRenameModal(item)}
-            style={styles.iconButton}
-          >
-            <Icon name="create-outline" size={20} color="#666" />
-          </TouchableOpacity>
-        </>
-      )}
-    </View>
-  );
-  
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', fetchGroups);
+    return unsubscribe;
+  }, [navigation]);
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Smart Buy</Text>
 
-      <View style={styles.buttonRow}>
-      <TouchableOpacity
-          style={styles.button}
-          onPress={() => {
-            // just reset edit mode and open a brand‐new basket
-            setIsEditing(false);
-            navigation.navigate('beforeShopping', { newBasket: true });
-          }}
+      <Text style={styles.subtitle}>👥 My Groups</Text>
+      <FlatList
+        data={groups}
+        keyExtractor={(item) => item._id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate('ShoppingList', {
+                listId: item.list?._id,
+                listName: `${item.name}'s Shared List`,
+              })
+            }
+          >
+            <Text style={styles.groupItem}>• {item.name}</Text>
+          </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+          <Text style={styles.item}>You don't belong to any group yet.</Text>
+        }
+      />
+
+      {/* Bottom Navigation Bar */}
+      <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 10 }]}>
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => setCreateGroupModalVisible(true)}
         >
-          <Text style={styles.buttonText}>CREATE LIST</Text>
+          <Icon name="add-circle" size={24} color="#fff" />
+          <Text style={styles.navButtonText}>Create</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.button, isEditing && styles.buttonActive]}
-          onPress={() => setIsEditing(prev => !prev)}
+          style={styles.navButton}
+          onPress={() => setIsEditing((prev) => !prev)}
         >
-          <Text style={styles.buttonText}>{isEditing ? 'CANCEL EDIT' : 'EDIT LIST'}</Text>
+          <Icon name="create-outline" size={24} color="#fff" />
+          <Text style={styles.navButtonText}>{isEditing ? 'Cancel' : 'Edit'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => navigation.navigate('GroupManager')}
+        >
+          <Icon name="people-circle-outline" size={24} color="#fff" />
+          <Text style={styles.navButtonText}>Groups</Text>
         </TouchableOpacity>
       </View>
 
-      {isEditing && <Text style={styles.helperText}>Tap a list to edit its items</Text>}
-
-      <Text style={styles.subtitle}>Existing Lists</Text>
-      <FlatList
-        data={lists}
-        keyExtractor={item => item._id}
-        renderItem={renderItem}
-      />
-
-      <Text style={styles.subtitle}>My Groups</Text>
-<FlatList
-  data={groups}
-  keyExtractor={(item) => item._id}
-  renderItem={({ item }) => (
-    <Text style={styles.item}>• {item.name}</Text>
-  )}
-  ListEmptyComponent={<Text style={styles.item}>You don't belong to any group yet.</Text>}
-/>
-
-<TouchableOpacity
-  style={styles.groupButton}
-  onPress={() => navigation.navigate('GroupManager')}
->
-  <Image
-    source={{ uri: 'https://img.icons8.com/ios-filled/50/groups.png' }}
-    style={{ width: 20, height: 20, marginRight: 8 }}
-  />
-  <Text style={styles.groupButtonText}>Manage Groups</Text>
-</TouchableOpacity>
-
-
-      
-
-      {/* Rename List Modal */}
+      {/* Create Group Modal */}
       <Modal
-        visible={renameModalVisible}
+        visible={createGroupModalVisible}
         transparent
-        animationType="slide"
-        onRequestClose={() => setRenameModalVisible(false)}
+        animationType="fade"
+        onRequestClose={() => setCreateGroupModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Rename List</Text>
+            <Text style={styles.modalTitle}>Create New Group</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="New List Name"
-              value={renameName}
-              onChangeText={setRenameName}
+              placeholder="Group Name"
+              value={newGroupName}
+              onChangeText={setNewGroupName}
             />
             <View style={styles.modalButtons}>
-              <Button title="Cancel" onPress={() => setRenameModalVisible(false)} />
-              <Button title="Save" onPress={handleRename} />
+              <Button
+                title="Cancel"
+                onPress={() => setCreateGroupModalVisible(false)}
+              />
+              <Button
+                title="Create"
+                onPress={async () => {
+                  if (!newGroupName.trim()) {
+                    Alert.alert('Enter a group name');
+                    return;
+                  }
+                  try {
+                    await api.post('/groups', { name: newGroupName.trim() });
+                    setNewGroupName('');
+                    setCreateGroupModalVisible(false);
+                    fetchGroups();
+                  } catch (err) {
+                    console.error('Group create error:', err);
+                    Alert.alert('Error creating group');
+                  }
+                }}
+              />
             </View>
           </View>
         </View>
@@ -277,37 +145,65 @@ const handleDeleteList = (id) => {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  subtitle: { fontSize: 18, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
-  helperText: { textAlign: 'center', marginBottom: 10, color: '#888' },
-  item: { fontSize: 16, flex: 1 },
-  iconButton: {marginHorizontal: 6},
-  listRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  listButton: { flex: 1 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
-  button: { backgroundColor: '#2196F3', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 6 },
-  buttonActive: { backgroundColor: '#1976D2' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  modalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalContent: { width: '80%', backgroundColor: '#fff', borderRadius: 8, padding: 20 },
-  modalTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  modalInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 5, padding: 10, marginBottom: 20 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-around' },
-  groupButton: {
-  marginTop: 20,
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: '#4CAF50',
-  paddingVertical: 12,
-  paddingHorizontal: 16,
-  borderRadius: 6,
-},
-groupButtonText: {
-  color: '#fff',
-  fontWeight: 'bold',
-  fontSize: 16,
-},
-
+  container: { flex: 1, padding: 20, paddingBottom: 70, backgroundColor: '#f9f9f9' },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#2E7D32',
+  },
+  subtitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 20,
+    marginBottom: 10,
+    color: '#444',
+  },
+  item: { fontSize: 16, color: '#333' },
+  groupItem: { fontSize: 16, color: '#1565C0', marginBottom: 6 },
+  bottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#2E7D32',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#ccc',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  navButton: { alignItems: 'center', justifyContent: 'center' },
+  navButtonText: { color: '#fff', fontSize: 12, marginTop: 2 },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    marginBottom: 10,
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
 });
