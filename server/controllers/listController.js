@@ -17,6 +17,12 @@ async function authorizeListAccess(listId, userId) {
   return list;
 }
 
+const emitListUpdate = (req, list) => {
+  const groupId = list.group?.toString();
+  const roomId = groupId || list.owner.toString();
+  req.app.get('io').to(roomId).emit('listUpdate');
+};
+
 // GET all this user’s lists (owned + shared)
 exports.getLists = async (req, res) => {
   try {
@@ -50,7 +56,6 @@ exports.createList = async (req, res) => {
   if (!name) return res.status(400).json({ message: 'List name is required' });
 
   try {
-    // Check group membership and prevent duplicates
     if (group) {
       const g = await Group.findById(group);
       if (!g || !g.members.includes(req.userId)) {
@@ -96,6 +101,8 @@ exports.updateList = async (req, res) => {
 
     await list.save();
     await list.populate('items');
+
+    emitListUpdate(req, list); // ✅ Emit list change
     res.json(list);
   } catch (err) {
     console.error('Error updating list:', err);
@@ -112,6 +119,7 @@ exports.deleteList = async (req, res) => {
     await Promise.all(list.items.map(itemId => Item.findByIdAndDelete(itemId)));
     await List.deleteOne({ _id: list._id });
 
+    emitListUpdate(req, list); // ✅ Emit removal
     res.json({ message: 'List and its items deleted successfully' });
   } catch (err) {
     console.error(err);
@@ -119,7 +127,7 @@ exports.deleteList = async (req, res) => {
   }
 };
 
-// POST /api/list → Add item to latest personal list OR by listId
+// POST /api/list
 exports.addItemToList = async (req, res) => {
   const { name, productId, icon, listId } = req.body;
   console.log('📥 Adding item:', { name, productId, icon });
@@ -150,6 +158,7 @@ exports.addItemToList = async (req, res) => {
     await list.save();
     await item.populate('product');
 
+    emitListUpdate(req, list); // ✅ Emit item addition
     res.status(201).json(item);
   } catch (err) {
     console.error('❌ Failed to add item:', err);
@@ -157,7 +166,7 @@ exports.addItemToList = async (req, res) => {
   }
 };
 
-// POST /lists/:id/items → Add to specific list
+// POST /lists/:id/items
 exports.addItemToListById = async (req, res) => {
   const { name, productId, icon } = req.body;
   const listId = req.params.id;
@@ -180,9 +189,44 @@ exports.addItemToListById = async (req, res) => {
     await list.save();
     await item.populate('product');
 
+    emitListUpdate(req, list); // ✅ Emit item addition
     res.status(201).json(item);
   } catch (err) {
     console.error('❌ Failed to add item:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// PATCH /list/item/:itemId/quantity
+exports.updateQuantity = async (req, res) => {
+  const { itemId } = req.params;
+  const { change } = req.body;
+
+  try {
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+
+    item.quantity += change;
+
+    if (item.quantity < 1) {
+      await item.remove();
+
+      // emit listUpdate to group if item was removed
+      const list = await List.findOne({ items: itemId }).populate('group');
+      if (list) emitListUpdate(req, list);
+
+      return res.json({ deleted: true });
+    }
+
+    await item.save();
+
+    // emit listUpdate to group if item was changed
+    const list = await List.findOne({ items: itemId }).populate('group');
+    if (list) emitListUpdate(req, list);
+
+    res.json(item);
+  } catch (err) {
+    console.error('❌ Quantity update error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

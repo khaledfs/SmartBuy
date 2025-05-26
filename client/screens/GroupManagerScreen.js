@@ -7,6 +7,7 @@ import api from '../services/api';
 import { jwtDecode } from 'jwt-decode';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { joinRoom, registerGroupUpdates } from '../services/socketEvents';
 
 export default function GroupManagerScreen() {
   const [groups, setGroups] = useState([]);
@@ -26,6 +27,15 @@ export default function GroupManagerScreen() {
     };
     init();
   }, []);
+
+  useEffect(() => {
+  groups.forEach(group => joinRoom(group._id));
+}, [groups]);
+
+useEffect(() => {
+  const unsubscribe = registerGroupUpdates(fetchMyGroups);
+  return unsubscribe;
+}, []);
 
   const fetchMyGroups = async () => {
     try {
@@ -161,7 +171,6 @@ export default function GroupManagerScreen() {
         ListEmptyComponent={<Text style={{ textAlign: 'center' }}>No groups yet.</Text>}
       />
 
-     
     </ScrollView>
   );
 }

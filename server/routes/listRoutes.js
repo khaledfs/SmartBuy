@@ -7,6 +7,8 @@ const ctl     = require('../controllers/listController');
 // Get all user’s lists (owned + group)
 router.get('/',       auth, ctl.getLists);
 
+router.patch('/item/:itemId/quantity', auth, ctl.updateQuantity);
+
 // Get single list (if user has access)
 router.get('/:id',    auth, ctl.getListById);
 

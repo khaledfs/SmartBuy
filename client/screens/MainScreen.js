@@ -10,11 +10,13 @@ import {
   SafeAreaView,
   Alert,
   Button,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { joinRoom, registerGroupUpdates } from '../services/socketEvents';
 
 export default function MainScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -22,6 +24,11 @@ export default function MainScreen({ navigation }) {
   const [isEditing, setIsEditing] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+
+  const logout = async () => {
+    await AsyncStorage.removeItem('token');
+    navigation.replace('Login');
+  };
 
   const fetchGroups = async () => {
     try {
@@ -46,9 +53,46 @@ export default function MainScreen({ navigation }) {
     return unsubscribe;
   }, [navigation]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Logout',
+              'Are you sure you want to logout?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Logout',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await AsyncStorage.removeItem('token');
+                    navigation.replace('Login');
+                  },
+                },
+              ]
+            );
+          }}
+          style={{ marginRight: 16 }}
+        >
+          <Icon name="log-out-outline" size={34} color="#000" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
+useEffect(() => {
+  groups.forEach(group => joinRoom(group._id));
+}, [groups]);
+
+useEffect(() => {
+  const unsubscribe = registerGroupUpdates(fetchGroups);
+  return unsubscribe;
+}, []);
+
   return (
     <SafeAreaView style={styles.container}>
-
       <Text style={styles.subtitle}>👥 My Groups</Text>
       <FlatList
         data={groups}

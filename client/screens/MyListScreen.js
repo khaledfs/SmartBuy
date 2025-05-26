@@ -1,5 +1,4 @@
 // client/screens/MyListScreen.js
-
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -19,6 +18,7 @@ import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Swipeable } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { joinRoom, registerListUpdates } from '../services/socketEvents';
 
 export default function MyListScreen({ navigation, route }) {
   const {
@@ -57,8 +57,7 @@ export default function MyListScreen({ navigation, route }) {
           }}
           style={{ marginRight: 16 }}
         >
-                 <Icon name="log-out-outline" size={34} color="#000" />
-          
+          <Icon name="log-out-outline" size={34} color="#000" />
         </TouchableOpacity>
       ),
     });
@@ -81,6 +80,37 @@ export default function MyListScreen({ navigation, route }) {
     }
   }, [listId, parentItems]);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      if (listId) {
+        try {
+          const { data } = await api.get(`/lists/${listId}`);
+          setRawItems(data.items);
+        } catch (err) {
+          console.error('refresh list error:', err);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [navigation, listId]);
+
+  useEffect(() => {
+    if (listId) {
+      joinRoom(listId);
+    }
+  }, [listId]);
+
+  useEffect(() => {
+    const unsubscribe = registerListUpdates(() => {
+      if (listId) {
+        api.get(`/lists/${listId}`)
+          .then(res => setRawItems(res.data.items))
+          .catch(err => console.error('Socket update failed:', err));
+      }
+    });
+    return unsubscribe;
+  }, [listId]);
+
   const groupedItems = useMemo(() => {
     const m = {};
     rawItems.forEach(it => {
@@ -89,12 +119,10 @@ export default function MyListScreen({ navigation, route }) {
         m[it.name] = {
           name: it.name,
           icon: sug?.icon.light,
-          count: 1,
           quantity: it.quantity || 1,
           ids: [it._id],
         };
       } else {
-        m[it.name].count++;
         m[it.name].quantity += it.quantity || 1;
         m[it.name].ids.push(it._id);
       }
@@ -102,14 +130,12 @@ export default function MyListScreen({ navigation, route }) {
     return Object.values(m);
   }, [rawItems, suggestions]);
 
-  const updateQuantity = async (itemId, newQuantity) => {
+  const updateQuantity = async (itemId, newQuantity, currentQuantity) => {
     try {
-      const res = await api.patch(`/list/${itemId}`, { quantity: newQuantity });
-      setRawItems(prev =>
-        prev.map(i =>
-          i._id === itemId ? { ...i, quantity: res.data.quantity } : i
-        )
-      );
+      const change = newQuantity - currentQuantity;
+      const res = await api.patch(`/list/item/${itemId}/quantity`, { change });
+      const { data } = await api.get(`/lists/${listId}`);
+      setRawItems(data.items);
     } catch (err) {
       console.error('Update quantity error:', err?.response?.data || err.message);
     }
@@ -118,14 +144,39 @@ export default function MyListScreen({ navigation, route }) {
   const handleIncrement = (group) => {
     const targetId = group.ids[0];
     const current = rawItems.find(i => i._id === targetId);
-    if (current) updateQuantity(targetId, current.quantity + 1);
+    if (current) updateQuantity(targetId, current.quantity + 1, current.quantity);
   };
 
   const handleDecrement = (group) => {
     const targetId = group.ids[0];
     const current = rawItems.find(i => i._id === targetId);
-    if (current?.quantity > 1) {
-      updateQuantity(targetId, current.quantity - 1);
+    if (current) updateQuantity(targetId, current.quantity - 1, current.quantity);
+  };
+
+  const handleAddItem = async (name) => {
+    const product = suggestions.find(p => p.name.en === name);
+    if (!product) return;
+
+    try {
+      let res;
+      if (listId) {
+        res = await api.post(`/lists/${listId}/items`, {
+          name: product.name.en,
+          icon: product.icon.light,
+          productId: product._id
+        });
+      } else {
+        res = await api.post('/list', {
+          name: product.name.en,
+          icon: product.icon.light,
+          productId: product._id
+        });
+      }
+
+      const newItem = res.data;
+      setRawItems(prev => [newItem, ...prev]);
+    } catch (error) {
+      console.error('Add + save error:', error?.response?.data || error.message);
     }
   };
 
@@ -157,7 +208,8 @@ export default function MyListScreen({ navigation, route }) {
             if (onDelete) await onDelete(id);
             else await api.delete(`/list/${id}`);
           }
-          setRawItems(prev => prev.filter(i => !group.ids.includes(i._id)));
+          const { data } = await api.get(`/lists/${listId}`);
+          setRawItems(data.items);
         } catch (err) {
           console.error('Swipe delete error:', err);
         }
@@ -243,7 +295,6 @@ export default function MyListScreen({ navigation, route }) {
     </SafeAreaView>
   );
 }
-
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#fff' },
   headerRow: {

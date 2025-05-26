@@ -15,10 +15,11 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { registerListUpdates, joinListRoom, emitListUpdate } from '../services/socketEvents';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ICON_SIZE = 80;
-const ICON_CONTAINER_WIDTH = SCREEN_WIDTH / 3 - 30; // ~3 per row
+const ICON_CONTAINER_WIDTH = SCREEN_WIDTH / 3 - 30;
 const LABEL_FONT_SIZE = 14;
 
 export default function ShoppingList({ navigation, route }) {
@@ -26,46 +27,44 @@ export default function ShoppingList({ navigation, route }) {
   const [item, setItem] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
-useEffect(() => {
-  navigation.setOptions({
-    headerRight: () => (
-      <TouchableOpacity
-        onPress={() => {
-          Alert.alert(
-            'Logout',
-            'Are you sure you want to logout?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: async () => {
-                  await AsyncStorage.removeItem('token');
-                  navigation.replace('Login');
-                }
-              }
-            ]
-          );
-        }}
-        style={{ marginRight: 16 }}
-      >
-               <Icon name="log-out-outline" size={34} color="#000" />
-        
-      </TouchableOpacity>
-    )
-  });
-}, [navigation]);
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            Alert.alert(
+              'Logout',
+              'Are you sure you want to logout?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Logout',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await AsyncStorage.removeItem('token');
+                    navigation.replace('Login');
+                  },
+                },
+              ]
+            );
+          }}
+          style={{ marginRight: 16 }}
+        >
+          <Icon name="log-out-outline" size={34} color="#000" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
 
   useEffect(() => {
     const init = async () => {
       const token = await AsyncStorage.getItem('token');
       if (!token) return navigation.replace('Login');
 
-      // fetch full product list (with price)
       const { data: s } = await api.get('/suggestions');
       setSuggestions(s);
 
-      // decide which list to load
       if (newBasket) {
         setItems([]);
       } else if (listId) {
@@ -78,34 +77,54 @@ useEffect(() => {
     };
     init();
   }, [newBasket, listId, navigation]);
-const handleAddItem = async (name) => {
-  const product = suggestions.find(p => p.name.en === name);
-  if (!product) return;
 
-  try {
-    let res;
-    if (listId) {
-      res = await api.post(`/lists/${listId}/items`, {
-        name: product.name.en,
-        icon: product.icon.light,
-        productId: product._id
-      });
-    } else {
-      res = await api.post('/list', {
-        name: product.name.en,
-        icon: product.icon.light,
-        productId: product._id
-      });
+useEffect(() => {
+  if (!listId) return;
+
+  joinListRoom(listId);
+
+  const unsubscribe = registerListUpdates(async ({ listId: updatedListId }) => {
+    if (updatedListId === listId) {
+      try {
+        const { data: list } = await api.get(`/lists/${listId}`);
+        setItems(list.items);
+      } catch (err) {
+        console.error('Socket refresh error:', err);
+      }
     }
+  });
 
-    const newItem = res.data;
-    setItems([newItem, ...items]);
-  } catch (error) {
-    console.error('Add + save error:', error?.response?.data || error.message);
-  }
-};
+  return unsubscribe;
+}, [listId]);
 
+  const handleAddItem = async (name) => {
+    const product = suggestions.find(p => p.name.en === name);
+    if (!product) return;
 
+    try {
+      let res;
+      if (listId) {
+        res = await api.post(`/lists/${listId}/items`, {
+          name: product.name.en,
+          icon: product.icon.light,
+          productId: product._id
+        });
+      } else {
+        res = await api.post('/list', {
+          name: product.name.en,
+          icon: product.icon.light,
+          productId: product._id
+        });
+      }
+
+      const newItem = res.data;
+      setItems([newItem, ...items]);
+      emitListUpdate(listId);
+
+    } catch (error) {
+      console.error('Add + save error:', error?.response?.data || error.message);
+    }
+  };
 
   const handleDeleteItem = async (id) => {
     try {
@@ -116,13 +135,25 @@ const handleAddItem = async (name) => {
     }
   };
 
+  const handleQuantityChange = async (item, delta) => {
+    try {
+      const res = await api.patch(`/list/item/${item._id}/quantity`, { change: delta });
+      if (res.data.deleted) {
+        setItems(prev => prev.filter(i => i._id !== item._id));
+      } else {
+        setItems(prev => prev.map(i => i._id === item._id ? res.data : i));
+      }
+    } catch (err) {
+      console.error('Quantity update failed:', err);
+    }
+  };
+
   const logout = async () => {
     await AsyncStorage.removeItem('token');
     navigation.replace('Login');
   };
 
   const renderGroupedSuggestions = () => {
-    // group by category and filter by search term
     const grouped = suggestions.reduce((acc, suggestion) => {
       const nameLower = suggestion.name?.en?.toLowerCase();
       if (!nameLower) return acc;
@@ -171,10 +202,7 @@ const handleAddItem = async (name) => {
           onPress={() =>
             navigation.navigate('MyList', {
               listId,
-              listName,
-              items,
-              setItems,
-              onDelete: handleDeleteItem,
+              listName
             })
           }
         >
