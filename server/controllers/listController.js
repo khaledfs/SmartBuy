@@ -127,6 +127,34 @@ exports.deleteList = async (req, res) => {
   }
 };
 
+// DELETE /list/item/:itemId
+exports.deleteItemById = async (req, res) => {
+  const { itemId } = req.params;
+
+  try {
+    const list = await List.findOne({ items: itemId }).populate('group');
+    if (!list) return res.status(404).json({ message: 'List not found for this item' });
+
+  
+    const hasAccess =
+      list.owner.toString() === req.userId ||
+      (list.group && list.group.members.some(m => m.toString() === req.userId));
+
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    list.items = list.items.filter(i => i.toString() !== itemId);
+    await list.save();
+    await Item.findByIdAndDelete(itemId);
+
+    emitListUpdate(req, list); // ✅ notify via socket
+    res.json({ message: 'Item deleted' });
+  } catch (err) {
+    console.error('❌ Failed to delete item:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+
 // POST /api/list
 exports.addItemToList = async (req, res) => {
   const { name, productId, icon, listId } = req.body;

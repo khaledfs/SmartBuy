@@ -1,6 +1,10 @@
 // services/socketEvents.js
 import socket from './socket';
 
+socket.on('connect', () => {
+  console.log('✅ socket connected:', socket.id);
+});
+
 /**
  * Listen for group changes (e.g. members added/removed, group deleted)
  * @param {Function} callback - function to run when groupUpdate is received

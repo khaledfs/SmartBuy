@@ -21,6 +21,9 @@ router.patch('/:id', auth, ctl.updateList);
 // Delete list
 router.delete('/:id', auth, ctl.deleteList);
 
+//Delte item
+router.delete('/item/:itemId', auth, ctl.deleteItemById); 
+
 // Add item to a list
 router.post('/:id/items', auth, ctl.addItemToListById);
 

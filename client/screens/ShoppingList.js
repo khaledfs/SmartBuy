@@ -78,15 +78,50 @@ export default function ShoppingList({ navigation, route }) {
     init();
   }, [newBasket, listId, navigation]);
 
+  useEffect(() => {
+    if (!listId) return;
+
+    joinListRoom(listId);
+
+    const unsubscribe = registerListUpdates(async ({ listId: updatedListId }) => {
+      if (updatedListId === listId) {
+        try {
+          const { data: list } = await api.get(`/lists/${listId}`);
+          setItems(list.items);
+        } catch (err) {
+          console.error('Socket refresh error:', err);
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [listId]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      if (listId) {
+        try {
+          const { data: list } = await api.get(`/lists/${listId}`);
+          setItems(list.items);
+        } catch (err) {
+          console.error('Focus refresh error:', err);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [navigation, listId]);
 useEffect(() => {
   if (!listId) return;
 
   joinListRoom(listId);
 
   const unsubscribe = registerListUpdates(async ({ listId: updatedListId }) => {
+    console.log('📡 received listUpdate for:', updatedListId);
+
     if (updatedListId === listId) {
       try {
         const { data: list } = await api.get(`/lists/${listId}`);
+        console.log('✅ updated items count:', list.items.length);
         setItems(list.items);
       } catch (err) {
         console.error('Socket refresh error:', err);
@@ -126,32 +161,9 @@ useEffect(() => {
     }
   };
 
-  const handleDeleteItem = async (id) => {
-    try {
-      await api.delete(`/list/${id}`);
-      setItems(items.filter((i) => i._id !== id));
-    } catch (error) {
-      console.error('Delete error:', error.message);
-    }
-  };
 
-  const handleQuantityChange = async (item, delta) => {
-    try {
-      const res = await api.patch(`/list/item/${item._id}/quantity`, { change: delta });
-      if (res.data.deleted) {
-        setItems(prev => prev.filter(i => i._id !== item._id));
-      } else {
-        setItems(prev => prev.map(i => i._id === item._id ? res.data : i));
-      }
-    } catch (err) {
-      console.error('Quantity update failed:', err);
-    }
-  };
 
-  const logout = async () => {
-    await AsyncStorage.removeItem('token');
-    navigation.replace('Login');
-  };
+
 
   const renderGroupedSuggestions = () => {
     const grouped = suggestions.reduce((acc, suggestion) => {
