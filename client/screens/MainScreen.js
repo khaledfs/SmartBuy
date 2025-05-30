@@ -10,20 +10,43 @@ import {
   SafeAreaView,
   Alert,
   Button,
-  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import Icon from 'react-native-vector-icons/Ionicons';
+import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { joinRoom, registerGroupUpdates } from '../services/socketEvents';
 
 export default function MainScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [groups, setGroups] = useState([]);
-  const [isEditing, setIsEditing] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [locationName, setLocationName] = useState(null);
+  const [editLocationVisible, setEditLocationVisible] = useState(false);
+  const [manualLocation, setManualLocation] = useState('');
+
+  useEffect(() => {
+    const fetchLocationName = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location access is required.');
+        return;
+      }
+      const { coords } = await Location.getCurrentPositionAsync({});
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      });
+      if (place) {
+        const city = place.city || place.region || place.name;
+        const country = place.country || '';
+        setLocationName(`${city}, ${country}`);
+      }
+    };
+    fetchLocationName();
+  }, []);
 
   const logout = async () => {
     await AsyncStorage.removeItem('token');
@@ -58,21 +81,14 @@ export default function MainScreen({ navigation }) {
       headerRight: () => (
         <TouchableOpacity
           onPress={() => {
-            Alert.alert(
-              'Logout',
-              'Are you sure you want to logout?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Logout',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await AsyncStorage.removeItem('token');
-                    navigation.replace('Login');
-                  },
-                },
-              ]
-            );
+            Alert.alert('Logout', 'Are you sure you want to logout?', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: logout,
+              },
+            ]);
           }}
           style={{ marginRight: 16 }}
         >
@@ -82,33 +98,45 @@ export default function MainScreen({ navigation }) {
     });
   }, [navigation]);
 
-useEffect(() => {
-  groups.forEach(group => joinRoom(group._id));
-}, [groups]);
+  useEffect(() => {
+    groups.forEach((group) => joinRoom(group._id));
+  }, [groups]);
 
-useEffect(() => {
-  const unsubscribe = registerGroupUpdates(fetchGroups);
-  return unsubscribe;
-}, []);
+  useEffect(() => {
+    const unsubscribe = registerGroupUpdates(fetchGroups);
+    return unsubscribe;
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
+      {locationName && (
+        <Text style={{ textAlign: 'center', color: '#666', marginBottom: 10 }}>
+          📍 Your Location: {locationName}
+        </Text>
+      )}
+
       <Text style={styles.subtitle}>👥 My Groups</Text>
       <FlatList
         data={groups}
         keyExtractor={(item) => item._id}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() =>
-              navigation.navigate('ShoppingList', {
-                listId: item.list?._id,
-                listName: `${item.name}'s Shared List`,
-              })
-            }
-          >
-            <Text style={styles.groupItem}>• {item.name}</Text>
-          </TouchableOpacity>
-        )}
+  <TouchableOpacity
+    style={styles.groupCard}
+    onPress={() =>
+      navigation.navigate('ShoppingList', {
+        listId: item.list?._id,
+        listName: `${item.name}'s Shared List`,
+      })
+    }
+  >
+    <View style={styles.groupCardLeft}>
+      <Icon name="people-outline" size={28} color="#2E7D32" style={{ marginRight: 12 }} />
+      <Text style={styles.groupCardName}>{item.name}</Text>
+    </View>
+    <Icon name="chevron-forward" size={20} color="#888" />
+  </TouchableOpacity>
+)}
+
         ListEmptyComponent={
           <Text style={styles.item}>You don't belong to any group yet.</Text>
         }
@@ -126,10 +154,10 @@ useEffect(() => {
 
         <TouchableOpacity
           style={styles.navButton}
-          onPress={() => setIsEditing((prev) => !prev)}
+          onPress={() => setEditLocationVisible(true)}
         >
-          <Icon name="create-outline" size={24} color="#fff" />
-          <Text style={styles.navButtonText}>{isEditing ? 'Cancel' : 'Edit'}</Text>
+          <Icon name="location-outline" size={24} color="#fff" />
+          <Text style={styles.navButtonText}>Location</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -184,19 +212,73 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
+
+      {/* Edit Location Modal */}
+      <Modal
+        visible={editLocationVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditLocationVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Edit Location</Text>
+            <Button
+              title="📍 Use Current Location"
+              onPress={async () => {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                  Alert.alert('Permission Denied', 'Location access is required.');
+                  return;
+                }
+                const { coords } = await Location.getCurrentPositionAsync({});
+                const [place] = await Location.reverseGeocodeAsync(coords);
+                const city = place.city || place.region || place.name;
+                const country = place.country || '';
+                setLocationName(`${city}, ${country}`);
+                setEditLocationVisible(false);
+              }}
+            />
+            <Text style={{ marginVertical: 10, textAlign: 'center' }}>OR</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Enter location manually"
+              value={manualLocation}
+              onChangeText={setManualLocation}
+            />
+            <View style={styles.modalButtons}>
+              <Button title="Cancel" onPress={() => setEditLocationVisible(false)} />
+              <Button
+                title="Set"
+                onPress={async () => {
+                  try {
+                    const results = await Location.geocodeAsync(manualLocation.trim());
+                    if (results.length === 0) {
+                      Alert.alert('Invalid Location', 'Please enter a real city or address.');
+                      return;
+                    }
+                    const { latitude, longitude } = results[0];
+                    const [place] = await Location.reverseGeocodeAsync({ latitude, longitude });
+                    const city = place.city || place.region || place.name;
+                    const country = place.country || '';
+                    setLocationName(`${city}, ${country}`);
+                    setEditLocationVisible(false);
+                  } catch (err) {
+                    Alert.alert('Error', 'Unable to validate location.');
+                    console.error(err);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingBottom: 70, backgroundColor: '#f9f9f9' },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 20,
-    color: '#2E7D32',
-  },
   subtitle: {
     fontSize: 20,
     fontWeight: '600',
@@ -249,5 +331,30 @@ const styles = StyleSheet.create({
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-  },
+  },groupCard: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  backgroundColor: '#fff',
+  padding: 16,
+  marginBottom: 10,
+  borderRadius: 12,
+  elevation: 2, // for Android shadow
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.1,
+  shadowRadius: 3,
+},
+
+groupCardLeft: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+
+groupCardName: {
+  fontSize: 16,
+  fontWeight: '600',
+  color: '#333',
+},
+
 });
