@@ -8,8 +8,8 @@ import {
   Button,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   Image,
+  FlatList,
   Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,30 +24,29 @@ const LABEL_FONT_SIZE = 14;
 
 export default function ShoppingList({ navigation, route }) {
   const { newBasket, listId, listName } = route.params || {};
-  const [item, setItem] = useState('');
+  const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
           onPress={() => {
-            Alert.alert(
-              'Logout',
-              'Are you sure you want to logout?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Logout',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await AsyncStorage.removeItem('token');
-                    navigation.replace('Login');
-                  },
+            Alert.alert('Logout', 'Are you sure you want to logout?', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: async () => {
+                  await AsyncStorage.removeItem('token');
+                  navigation.replace('Login');
                 },
-              ]
-            );
+              },
+            ]);
           }}
           style={{ marginRight: 16 }}
         >
@@ -57,13 +56,30 @@ export default function ShoppingList({ navigation, route }) {
     });
   }, [navigation]);
 
+  const fetchSuggestions = async (reset = false) => {
+    if (isLoading || (!hasMore && !reset)) return;
+    setIsLoading(true);
+    const nextPage = reset ? 1 : page;
+
+    try {
+      const res = await api.get('/suggestions', {
+        params: { page: nextPage, limit: 30, q: search },
+      });
+      const newData = Array.isArray(res.data?.suggestions) ? res.data.suggestions : [];
+      setSuggestions(prev => (reset ? newData : [...prev, ...newData]));
+      setPage(nextPage + 1);
+      setHasMore(newData.length >= 30);
+    } catch (err) {
+      console.error('Fetch suggestions error:', err.message);
+    }
+
+    setIsLoading(false);
+  };
+
   useEffect(() => {
     const init = async () => {
       const token = await AsyncStorage.getItem('token');
       if (!token) return navigation.replace('Login');
-
-      const { data: s } = await api.get('/suggestions');
-      setSuggestions(s);
 
       if (newBasket) {
         setItems([]);
@@ -76,11 +92,33 @@ export default function ShoppingList({ navigation, route }) {
       }
     };
     init();
+    fetchSuggestions(true);
   }, [newBasket, listId, navigation]);
 
   useEffect(() => {
-    if (!listId) return;
+    const timeout = setTimeout(() => {
+      setPage(1);
+      fetchSuggestions(true);
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [search]);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      if (listId) {
+        try {
+          const { data: list } = await api.get(`/lists/${listId}`);
+          setItems(list.items);
+        } catch (err) {
+          console.error('Focus refresh error:', err);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [navigation, listId]);
+
+  useEffect(() => {
+    if (!listId) return;
     joinListRoom(listId);
 
     const unsubscribe = registerListUpdates(async ({ listId: updatedListId }) => {
@@ -97,57 +135,22 @@ export default function ShoppingList({ navigation, route }) {
     return unsubscribe;
   }, [listId]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', async () => {
-      if (listId) {
-        try {
-          const { data: list } = await api.get(`/lists/${listId}`);
-          setItems(list.items);
-        } catch (err) {
-          console.error('Focus refresh error:', err);
-        }
-      }
-    });
-    return unsubscribe;
-  }, [navigation, listId]);
-useEffect(() => {
-  if (!listId) return;
-
-  joinListRoom(listId);
-
-  const unsubscribe = registerListUpdates(async ({ listId: updatedListId }) => {
-    console.log('📡 received listUpdate for:', updatedListId);
-
-    if (updatedListId === listId) {
-      try {
-        const { data: list } = await api.get(`/lists/${listId}`);
-        console.log('✅ updated items count:', list.items.length);
-        setItems(list.items);
-      } catch (err) {
-        console.error('Socket refresh error:', err);
-      }
-    }
-  });
-
-  return unsubscribe;
-}, [listId]);
-
   const handleAddItem = async (name) => {
-    const product = suggestions.find(p => p.name.en === name);
+    const product = suggestions.find(p => p.name === name);
     if (!product) return;
 
     try {
       let res;
       if (listId) {
         res = await api.post(`/lists/${listId}/items`, {
-          name: product.name.en,
-          icon: product.icon.light,
+          name: product.name,
+          icon: product.img,
           productId: product._id
         });
       } else {
         res = await api.post('/list', {
-          name: product.name.en,
-          icon: product.icon.light,
+          name: product.name,
+          icon: product.img,
           productId: product._id
         });
       }
@@ -161,62 +164,13 @@ useEffect(() => {
     }
   };
 
-
-
-
-
-  const renderGroupedSuggestions = () => {
-    const grouped = suggestions.reduce((acc, suggestion) => {
-      const nameLower = suggestion.name?.en?.toLowerCase();
-      if (!nameLower) return acc;
-      if (!nameLower.startsWith(item.toLowerCase())) return acc;
-      if (!acc[suggestion.category]) acc[suggestion.category] = [];
-      acc[suggestion.category].push(suggestion);
-      return acc;
-    }, {});
-
-    return Object.entries(grouped).map(([category, prods]) => (
-      <View key={category} style={styles.card}>
-        <Text style={styles.cardTitle}>{category}</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalList}
-        >
-          {prods.map((p) => (
-            <TouchableOpacity
-              key={p.key}
-              style={styles.iconContainer}
-              onPress={() => handleAddItem(p.name.en)}
-            >
-              <Image source={{ uri: p.icon.light }} style={styles.icon} />
-              <Text style={styles.iconLabel} numberOfLines={1}>
-                {p.name.en}
-              </Text>
-              <Text style={styles.priceLabel}>
-                ₪{p.price?.toFixed(2) ?? '–'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    ));
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>
-          {listName ? `Editing: ${listName}` : ''}
-        </Text>
+        <Text style={styles.title}>{listName ? `Editing: ${listName}` : ''}</Text>
         <TouchableOpacity
           style={styles.basketIcon}
-          onPress={() =>
-            navigation.navigate('MyList', {
-              listId,
-              listName
-            })
-          }
+          onPress={() => navigation.navigate('MyList', { listId, listName })}
         >
           <Icon name="cart-outline" size={28} />
           {items.length > 0 && (
@@ -230,16 +184,31 @@ useEffect(() => {
       <TextInput
         style={styles.input}
         placeholder="Search items..."
-        value={item}
-        onChangeText={setItem}
+        value={search}
+        onChangeText={setSearch}
         autoComplete="off"
         autoCorrect={false}
       />
 
-      <ScrollView style={styles.suggestionArea}>
-        <Text style={styles.subtitle}>Suggestions</Text>
-        {renderGroupedSuggestions()}
-      </ScrollView>
+      <FlatList
+  data={suggestions}
+  keyExtractor={(item, index) => `${item._id || item.barcode || index}`}
+  numColumns={2}
+  onEndReached={() => fetchSuggestions()}
+  onEndReachedThreshold={0.5}
+  contentContainerStyle={{ paddingBottom: 60 }}
+  renderItem={({ item }) => (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => handleAddItem(item.name)}
+    >
+      <Image source={{ uri: item.img }} style={styles.cardImage} />
+      <Text style={styles.cardLabel} numberOfLines={2}>{item.name}</Text>
+    </TouchableOpacity>
+  )}
+  ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 40 }}>No suggestions found.</Text>}
+/>
+
 
       <View style={styles.footer}>
         <Button
@@ -268,22 +237,10 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
   },
-  suggestionArea: { flex: 1, marginBottom: 10 },
-  subtitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-  card: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  cardTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
-  horizontalList: {
-    alignItems: 'flex-start',
-  },
   iconContainer: {
     width: ICON_CONTAINER_WIDTH,
     alignItems: 'center',
-    marginRight: 12,
+    margin: 6,
   },
   icon: {
     width: ICON_SIZE,
@@ -294,12 +251,6 @@ const styles = StyleSheet.create({
   iconLabel: {
     fontSize: LABEL_FONT_SIZE,
     textAlign: 'center',
-  },
-  priceLabel: {
-    marginTop: 2,
-    fontSize: LABEL_FONT_SIZE,
-    fontWeight: '600',
-    color: '#333',
   },
   basketIcon: { padding: 8, position: 'relative' },
   badge: {
@@ -313,4 +264,26 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
   footer: { marginTop: 6 },
+  card: {
+  width: SCREEN_WIDTH / 2 - 24,
+  backgroundColor: '#f9f9f9',
+  borderRadius: 12,
+  padding: 10,
+  margin: 6,
+  alignItems: 'center',
+  borderWidth: 1,
+  borderColor: '#ddd',
+},
+cardImage: {
+  width: 80,
+  height: 80,
+  marginBottom: 6,
+  resizeMode: 'contain',
+},
+cardLabel: {
+  fontSize: 14,
+  textAlign: 'center',
+  color: '#333',
+},
+
 });

@@ -65,7 +65,7 @@ export default function MyListScreen({ navigation, route }) {
 
   useEffect(() => {
     api.get('/suggestions')
-      .then(res => setSuggestions(res.data))
+      .then(res => setSuggestions(res.data?.suggestions || []))
       .catch(err => console.error(err));
   }, []);
 
@@ -115,10 +115,10 @@ export default function MyListScreen({ navigation, route }) {
     const m = {};
     rawItems.forEach(it => {
       if (!m[it.name]) {
-        const sug = suggestions.find(s => s.name.en === it.name);
+        const sug = suggestions.find(s => it.name.includes(s.name) || s.name.includes(it.name));
         m[it.name] = {
           name: it.name,
-          icon: sug?.icon.light,
+          icon: it.icon || it.img,
           quantity: it.quantity || 1,
           ids: [it._id],
         };
@@ -141,60 +141,60 @@ export default function MyListScreen({ navigation, route }) {
     }
   };
 
-const handleIncrement = async (group) => {
-  try {
-    await handleAddItem(group.name);  
-    
-  } catch (err) {
-    console.error('Increment via add failed:', err);
-  }
-};
-
-const handleDecrement = async (group) => {
-  const name = group.name;
-  const product = suggestions.find(p => p.name.en === name);
-  if (!product) return;
-
-  try {
-    const existingItem = rawItems.find(i => i.name === name);
-    if (!existingItem) return;
-
-    if (existingItem.quantity === 1) {
-      await api.delete(`/list/item/${existingItem._id}`);
-      setRawItems(prev => prev.filter(i => i._id !== existingItem._id));
-    } else {
-      const res = await api.patch(`/list/item/${existingItem._id}/quantity`, { change: -1 });
-      const updatedItem = res.data;
-      setRawItems(prev =>
-        prev.map(i => (i._id === existingItem._id ? updatedItem : i))
-      );
+  const handleIncrement = async (group) => {
+    try {
+      await handleAddItem(group.name);  
+    } catch (err) {
+      console.error('Increment via add failed:', err);
     }
-  } catch (err) {
-    console.error('Decrement via inverse-add failed:', err);
-  }
-};
+  };
+
+  const handleDecrement = async (group) => {
+    const name = group.name;
+    const product = suggestions.find(p => p.name === name);
+    if (!product) return;
+
+    try {
+      const existingItem = rawItems.find(i => i.name === name);
+      if (!existingItem) return;
+
+      if (existingItem.quantity === 1) {
+        await api.delete(`/list/item/${existingItem._id}`);
+        setRawItems(prev => prev.filter(i => i._id !== existingItem._id));
+      } else {
+        const res = await api.patch(`/list/item/${existingItem._id}/quantity`, { change: -1 });
+        const updatedItem = res.data;
+        setRawItems(prev =>
+          prev.map(i => (i._id === existingItem._id ? updatedItem : i))
+        );
+      }
+    } catch (err) {
+      console.error('Decrement via inverse-add failed:', err);
+    }
+  };
+
   const handleAddItem = async (name) => {
-    const product = suggestions.find(p => p.name.en === name);
+    const product = suggestions.find(p => p.name === name);
     if (!product) return;
 
     try {
       let res;
       if (listId) {
         res = await api.post(`/lists/${listId}/items`, {
-          name: product.name.en,
-          icon: product.icon.light,
+          name: product.name,
+          icon: product.img,
           productId: product._id
         });
       } else {
         res = await api.post('/list', {
-          name: product.name.en,
-          icon: product.icon.light,
+          name: product.name,
+          icon: product.img,
           productId: product._id
         });
       }
 
       const newItem = res.data;
-     setRawItems(prev => [...prev, newItem]);
+      setRawItems(prev => [...prev, newItem]);
 
     } catch (error) {
       console.error('Add + save error:', error?.response?.data || error.message);
@@ -220,6 +220,16 @@ const handleDecrement = async (group) => {
     }
   };
 
+  const handleMarkAsBought = async (group) => {
+  try {
+    const itemId = group.ids[0];
+    await api.post(`/list/item/${itemId}/buy`);
+    setRawItems(prev => prev.filter(i => i._id !== itemId));
+  } catch (err) {
+    console.error('❌ Failed to mark as bought:', err?.response?.data || err.message);
+  }
+};
+
   const renderSwipeActions = (group) => (
     <TouchableOpacity
       style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', width: 70 }}
@@ -228,7 +238,6 @@ const handleDecrement = async (group) => {
           for (let id of group.ids) {
             if (onDelete) await onDelete(id);
             else await api.delete(`/list/item/${id}`);
-
           }
           const { data } = await api.get(`/lists/${listId}`);
           setRawItems(data.items);
@@ -250,40 +259,43 @@ const handleDecrement = async (group) => {
       </View>
 
       <FlatList
-  data={groupedItems}
-  keyExtractor={(g) => g.ids[0]}         
-  extraData={rawItems}                   
-  renderItem={({ item: g }) => (
-    <Swipeable renderRightActions={() => renderSwipeActions(g)}>
-      <View style={styles.itemRow}>
-        {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
-        <Text style={styles.itemText}>{g.name}</Text>
-        <View style={styles.quantityControls}>
-          <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
-            <Text style={styles.qBtnText}>−</Text>
-          </TouchableOpacity>
-          <Text style={styles.qCountText}>{g.quantity}</Text>
-          <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
-            <Text style={styles.qBtnText}>+</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Swipeable>
-  )}
-  ListEmptyComponent={
-    <View style={styles.emptyContainer}>
-      <LottieView
-        source={require('../assets/animations/grocery.json')}
-        autoPlay
-        loop
-        style={styles.lottie}
-      />
-      <Text style={styles.emptyText}>Your list is empty</Text>
-      <Text style={styles.emptySubtext}>Add something tasty 🥦🍞🥛</Text>
-    </View>
-  }
-/>
+        data={groupedItems}
+        keyExtractor={(g) => g.ids[0]}
+        extraData={rawItems}
+        renderItem={({ item: g }) => (
+          <Swipeable renderRightActions={() => renderSwipeActions(g)}>
+            <View style={styles.itemRow}>
+              {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
+              <Text style={styles.itemText}>{g.name}</Text>
+              <View style={styles.quantityControls}>
+  <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
+    <Text style={styles.qBtnText}>−</Text>
+  </TouchableOpacity>
+  <Text style={styles.qCountText}>{g.quantity}</Text>
+  <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
+    <Text style={styles.qBtnText}>+</Text>
+  </TouchableOpacity>
+  <TouchableOpacity onPress={() => handleMarkAsBought(g)} style={styles.buyBtn}>
+    <Icon name="checkmark-done-outline" size={20} color="#fff" />
+  </TouchableOpacity>
+</View>
 
+            </View>
+          </Swipeable>
+        )}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <LottieView
+              source={require('../assets/animations/grocery.json')}
+              autoPlay
+              loop
+              style={styles.lottie}
+            />
+            <Text style={styles.emptyText}>Your list is empty</Text>
+            <Text style={styles.emptySubtext}>Add something tasty 🥦🍞🥛</Text>
+          </View>
+        }
+      />
 
       <View style={styles.footer}>
         {!listId && (
@@ -319,6 +331,7 @@ const handleDecrement = async (group) => {
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#fff' },
   headerRow: {
@@ -401,4 +414,11 @@ const styles = StyleSheet.create({
     color: '#888',
     marginTop: 4,
   },
+  buyBtn: {
+  backgroundColor: '#4CAF50',
+  borderRadius: 4,
+  paddingHorizontal: 8,
+  paddingVertical: 4,
+  marginLeft: 6,
+},
 });

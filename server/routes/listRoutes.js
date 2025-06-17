@@ -24,8 +24,12 @@ router.delete('/:id', auth, ctl.deleteList);
 //Delte item
 router.delete('/item/:itemId', auth, ctl.deleteItemById); 
 
+router.post('/item/:id/buy', auth, ctl.markItemAsBought);
+
+
 // Add item to a list
 router.post('/:id/items', auth, ctl.addItemToListById);
+
 
 
 module.exports = router;

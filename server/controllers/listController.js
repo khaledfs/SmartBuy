@@ -1,6 +1,7 @@
 const List = require('../models/List');
 const Item = require('../models/Item');
 const Group = require('../models/Group');
+const PurchaseHistory = require('../models/PurchaseHistory');
 
 // 🔁 REUSABLE access-check helper
 async function authorizeListAccess(listId, userId) {
@@ -255,6 +256,46 @@ exports.updateQuantity = async (req, res) => {
     res.json(item);
   } catch (err) {
     console.error('❌ Quantity update error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+
+exports.markItemAsBought = async (req, res) => {
+  const { id: itemId } = req.params;
+
+  try {
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+
+    const list = await List.findOne({ items: itemId }).populate('group');
+    if (!list) return res.status(404).json({ message: 'List not found for this item' });
+
+    const hasAccess =
+      list.owner.toString() === req.userId ||
+      (list.group && list.group.members.some(m => m.toString() === req.userId));
+
+    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+    // سجل في التاريخ
+    await PurchaseHistory.create({
+      name: item.name,
+      product: item.product,
+      quantity: item.quantity,
+      user: req.userId,
+      boughtAt: new Date()
+    });
+
+    // احذف من القائمة
+    list.items = list.items.filter(i => i.toString() !== itemId);
+    await list.save();
+    await Item.findByIdAndDelete(itemId);
+
+    emitListUpdate(req, list);
+    res.json({ message: 'Item marked as bought and archived' });
+
+  } catch (err) {
+    console.error('❌ Failed to mark item as bought:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

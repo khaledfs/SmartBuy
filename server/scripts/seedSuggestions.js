@@ -9,11 +9,10 @@ const run = async () => {
   await mongoose.connect(process.env.MONGO_URI);
   await Suggestion.deleteMany({});
   const docs = SUGGESTIONS.map(p => ({
-    name: { en: p.name },
-    category: p.category,
-    icon: { light: p.iconUrl, dark: p.iconUrl },
-    key: p.name.toLowerCase().replace(/ /g, '_'),
-    price:    p.price 
+    name:    p.name,
+    barcode: p.barcode,
+    img:     p.img,
+    count:   p.count ?? 1
   }));
   await Suggestion.insertMany(docs);
   console.log('✅ Seeded with prices');
