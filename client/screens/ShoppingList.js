@@ -23,7 +23,7 @@ const ICON_CONTAINER_WIDTH = SCREEN_WIDTH / 3 - 30;
 const LABEL_FONT_SIZE = 14;
 
 export default function ShoppingList({ navigation, route }) {
-  const { newBasket, listId, listName } = route.params || {};
+  const { newBasket, listId, listName, location } = route.params || {};
   const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
@@ -170,8 +170,11 @@ export default function ShoppingList({ navigation, route }) {
         <Text style={styles.title}>{listName ? `Editing: ${listName}` : ''}</Text>
         <TouchableOpacity
           style={styles.basketIcon}
-          onPress={() => navigation.navigate('MyList', { listId, listName })}
-        >
+onPress={() => navigation.navigate('MyList', {
+  listId,
+  listName,
+  location,          
+})}        >
           <Icon name="cart-outline" size={28} />
           {items.length > 0 && (
             <View style={styles.badge}>

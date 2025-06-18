@@ -27,12 +27,20 @@ export default function MyListScreen({ navigation, route }) {
     items: parentItems,
     setItems: updateParentItems,
     onDelete,
+    location,
   } = route.params || {};
 
   const [rawItems, setRawItems] = useState(parentItems || []);
   const [suggestions, setSuggestions] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [listName, setListName] = useState(initialName || '');
+  const [locationCity, setLocationCity] = useState('');
+
+  useEffect(() => {
+    AsyncStorage.getItem('locationName')
+      .then(city => setLocationCity(city || ''))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({
@@ -221,14 +229,14 @@ export default function MyListScreen({ navigation, route }) {
   };
 
   const handleMarkAsBought = async (group) => {
-  try {
-    const itemId = group.ids[0];
-    await api.post(`/list/item/${itemId}/buy`);
-    setRawItems(prev => prev.filter(i => i._id !== itemId));
-  } catch (err) {
-    console.error('❌ Failed to mark as bought:', err?.response?.data || err.message);
-  }
-};
+    try {
+      const itemId = group.ids[0];
+      await api.post(`/list/item/${itemId}/buy`);
+      setRawItems(prev => prev.filter(i => i._id !== itemId));
+    } catch (err) {
+      console.error('❌ Failed to mark as bought:', err?.response?.data || err.message);
+    }
+  };
 
   const renderSwipeActions = (group) => (
     <TouchableOpacity
@@ -268,18 +276,17 @@ export default function MyListScreen({ navigation, route }) {
               {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
               <Text style={styles.itemText}>{g.name}</Text>
               <View style={styles.quantityControls}>
-  <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
-    <Text style={styles.qBtnText}>−</Text>
-  </TouchableOpacity>
-  <Text style={styles.qCountText}>{g.quantity}</Text>
-  <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
-    <Text style={styles.qBtnText}>+</Text>
-  </TouchableOpacity>
-  <TouchableOpacity onPress={() => handleMarkAsBought(g)} style={styles.buyBtn}>
-    <Icon name="checkmark-done-outline" size={20} color="#fff" />
-  </TouchableOpacity>
-</View>
-
+                <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
+                  <Text style={styles.qBtnText}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.qCountText}>{g.quantity}</Text>
+                <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
+                  <Text style={styles.qBtnText}>+</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleMarkAsBought(g)} style={styles.buyBtn}>
+                  <Icon name="checkmark-done-outline" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
           </Swipeable>
         )}
@@ -305,6 +312,31 @@ export default function MyListScreen({ navigation, route }) {
           </>
         )}
       </View>
+
+      {listId && (
+        <View style={{ marginTop: 12 }}>
+          <Button
+  title="📍 Where To Buy"
+  onPress={() => {
+    if (!locationCity || rawItems.length === 0) {
+      console.warn('⚠️ Missing location or items in route params');
+      Alert.alert('Missing Data', 'Ensure your location and list items are loaded');
+      return;
+    }
+    console.log('🚀 Navigating with locationCity:', locationCity, 'Items:', rawItems.length);
+
+    navigation.navigate('WhereToBuy', {
+      listId,
+      listName,
+      items: rawItems,
+      locationCity   // ← 🔥 Pass it explicitly!
+    });
+  }}
+  color="#007AFF"
+/>
+
+        </View>
+      )}
 
       <Modal
         visible={modalVisible}
@@ -415,10 +447,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   buyBtn: {
-  backgroundColor: '#4CAF50',
-  borderRadius: 4,
-  paddingHorizontal: 8,
-  paddingVertical: 4,
-  marginLeft: 6,
-},
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 6,
+  },
 });

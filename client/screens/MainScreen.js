@@ -27,26 +27,29 @@ export default function MainScreen({ navigation }) {
   const [editLocationVisible, setEditLocationVisible] = useState(false);
   const [manualLocation, setManualLocation] = useState('');
 
-  useEffect(() => {
-    const fetchLocationName = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location access is required.');
-        return;
-      }
-      const { coords } = await Location.getCurrentPositionAsync({});
-      const [place] = await Location.reverseGeocodeAsync({
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-      });
-      if (place) {
-        const city = place.city || place.region || place.name;
-        const country = place.country || '';
-        setLocationName(`${city}, ${country}`);
-      }
-    };
-    fetchLocationName();
-  }, []);
+useEffect(() => {
+  const fetchLocationName = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Location access is required.');
+      return;
+    }
+    const { coords } = await Location.getCurrentPositionAsync({});
+    const [place] = await Location.reverseGeocodeAsync({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    });
+    if (place) {
+      const city = place.city || place.region || place.name;
+      const country = place.country || '';
+      const fullLocation = `${city}, ${country}`;
+      setLocationName(fullLocation);
+      await AsyncStorage.setItem('locationName', city); // ← 🔥 זה חשוב
+    }
+  };
+  fetchLocationName();
+}, []);
+
 
   const logout = async () => {
     await AsyncStorage.removeItem('token');
@@ -126,6 +129,7 @@ export default function MainScreen({ navigation }) {
       navigation.navigate('ShoppingList', {
         listId: item.list?._id,
         listName: `${item.name}'s Shared List`,
+          location: locationName,   
       })
     }
   >
@@ -262,6 +266,8 @@ export default function MainScreen({ navigation }) {
                     const city = place.city || place.region || place.name;
                     const country = place.country || '';
                     setLocationName(`${city}, ${country}`);
+                        await AsyncStorage.setItem('locationName', city); // ← הוספה חשובה
+
                     setEditLocationVisible(false);
                   } catch (err) {
                     Alert.alert('Error', 'Unable to validate location.');

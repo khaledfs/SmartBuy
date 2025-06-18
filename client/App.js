@@ -11,6 +11,7 @@ import MyListScreen from './screens/MyListScreen';
 import TransitionScreen from './screens/TransitionScreen';
 import TransitionScreen2 from './screens/TransitionScreen2';
 import GroupManagerScreen from './screens/GroupManagerScreen';
+import WhereToBuyScreen from './screens/WhereToBuyScreen';
 
 
 const Stack = createStackNavigator();
@@ -37,6 +38,7 @@ export default function App() {
         <Stack.Screen name="ShoppingList" component={ShoppingList} />
         <Stack.Screen name="MyList" component={MyListScreen} />
         <Stack.Screen name="GroupManager" component={GroupManagerScreen} />
+        <Stack.Screen name="WhereToBuy" component={WhereToBuyScreen} />
       </Stack.Navigator>
     </NavigationContainer>
         </SafeAreaProvider>

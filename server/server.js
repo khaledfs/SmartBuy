@@ -37,6 +37,9 @@ app.use('/api/lists', require('./routes/listRoutes'));
 // Suggestions
 app.use('/api/suggestions', require('./routes/suggestionRoutes'));
 
+// Price comparison
+app.use('/api/compare', require('./routes/compareRoutes'));
+
 // Groups
 app.use('/api/groups', require('./routes/groupRoutes'));
 
