@@ -1,15 +1,39 @@
+// server/models/Suggestion.js
 const mongoose = require('mongoose');
 
-const SuggestionSchema = new mongoose.Schema({
-  name: {
-    en: { type: String, required: true },
+const suggestionSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  category: { type: String, required: true },
-  icon: {
-    light: { type: String, required: true },
-    dark: { type: String, required: true },
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    required: true
   },
-  key: { type: String, unique: true, required: true },
+  type: {
+    type: String,
+    enum: ['frequent', 'recent', 'popular', 'seasonal', 'favorite'],
+    required: true
+  },
+  score: {
+    type: Number,
+    default: 0
+  },
+  lastSuggested: {
+    type: Date,
+    default: Date.now
+  },
+  frequency: {
+    type: Number,
+    default: 1
+  }
+}, {
+  timestamps: true
 });
 
-module.exports = mongoose.model('Suggestion', SuggestionSchema);
+// Compound index to prevent duplicate suggestions
+suggestionSchema.index({ userId: 1, productId: 1, type: 1 }, { unique: true });
+
+module.exports = mongoose.model('Suggestion', suggestionSchema);

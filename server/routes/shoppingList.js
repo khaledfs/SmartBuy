@@ -6,17 +6,18 @@ const {
   updateItem,
   deleteItem,
 } = require('../controllers/shoppingListController');
+const auth = require('../middleware/authMiddleware');
 
 // GET /api/list 
-router.get('/', getItems);
+router.get('/',auth, getItems);
 
 // POST /api/list 
-router.post('/', addItem);
+router.post('/',auth, addItem);
 
 // PUT /api/list/:id 
-router.put('/:id', updateItem);
+router.put('/:id',auth, updateItem);
 
 // DELETE /api/list/:id 
-router.delete('/:id', deleteItem);
+router.delete('/:id',auth, deleteItem);
 
 module.exports = router;
