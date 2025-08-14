@@ -1,13 +1,14 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const List = require('../models/List'); // Import List model
 
-// ✅ Include full user payload in token (not just ID)
+// Create JWT token for user authentication
 const createToken = (user) => {
   return jwt.sign(
     {
       id: user._id,
-      username: user.username,
+      username: user.username, // <-- This is critical!
       phone: user.phone
     },
     process.env.JWT_SECRET,
@@ -38,8 +39,16 @@ exports.signup = async (req, res) => {
       profilePicUrl: profilePicUrl || ''
     });
 
+    // Automatically create a default shopping list for the new user
+    const defaultList = new List({
+      name: 'My List',
+      owner: newUser._id,
+      items: []
+    });
+    await defaultList.save();
+
     const token = createToken(newUser);
-    console.log('✅ Signup success, token issued for:', newUser.username);
+    console.log('User signed up successfully:', newUser.username);
     res.status(201).json({ message: 'User created', token });
   } catch (err) {
     if (err.code === 11000) {
@@ -74,7 +83,7 @@ exports.login = async (req, res) => {
     }
 
     const token = createToken(user);
-    console.log('✅ Login success, token issued for:', user.username);
+    console.log('User logged in successfully:', user.username);
     res.status(200).json({ message: 'Login successful', token });
   } catch (err) {
     console.error('Login error:', err);

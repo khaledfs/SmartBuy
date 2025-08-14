@@ -2,11 +2,10 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import LottieView from 'lottie-react-native';
 
-export default function TransitionScreen({ navigation }) {
+export default function TransitionScreenPersonal({ navigation }) {
   useEffect(() => {
     const timer = setTimeout(() => {
-
-      navigation.replace('ShoppingList', { newBasket: true });
+      navigation.replace('MyList');
     }, 2500); // Adjust duration to match animation
 
     return () => clearTimeout(timer);
@@ -15,7 +14,7 @@ export default function TransitionScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <LottieView
-        source={require('../assets/animations/beforeShopping.json')} // use your desired animation here
+        source={require('../assets/animations/beforeShopping.json')}
         autoPlay
         loop={false}
         style={styles.animation}

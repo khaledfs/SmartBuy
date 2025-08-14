@@ -2,38 +2,74 @@ const List = require('../models/List');
 const Item = require('../models/Item');
 const Group = require('../models/Group');
 const PurchaseHistory = require('../models/PurchaseHistory');
+const TrainingExample = require('../models/TrainingExample');
+const ProductHistory = require('../models/ProductHistory');
+const { extractFeaturesForProduct } = require('../services/ml/features');
+
+/* ----------------------------- helpers ----------------------------- */
+
+const toId = v => (v?.toString ? v.toString() : String(v));
+
+const groupIdOf = g =>
+  g
+    ? (g._id ? g._id.toString()
+             : (typeof g === 'string' ? g : null))
+    : null;
+
+const isMember = (groupDocOrId, userId) => {
+  // If it's just an id, assume membership checked elsewhere
+  if (!groupDocOrId || typeof groupDocOrId === 'string') return false;
+  const members = groupDocOrId.members || [];
+  return members.some(m => toId(m.user) === toId(userId));
+};
 
 // 🔁 REUSABLE access-check helper
 async function authorizeListAccess(listId, userId) {
   const list = await List.findById(listId).populate('group');
-  if (
-    !list ||
-    (
-      list.owner.toString() !== userId &&
-      !(list.group && list.group.members.some(m => m.toString() === userId))
-    )
-  ) {
-    return null;
-  }
-  return list;
+  if (!list) return null;
+
+  const owner = toId(list.owner);
+  const ok =
+    owner === toId(userId) ||
+    (list.group && isMember(list.group, userId));
+
+  return ok ? list : null;
 }
 
-const emitListUpdate = (req, list) => {
-  const groupId = list.group?.toString();
-  const roomId = groupId || list.owner.toString();
-  req.app.get('io').to(roomId).emit('listUpdate');
+const emitListUpdate = (req, list, action = 'itemUpdated', itemName = null, itemId = null) => {
+  const gid = groupIdOf(list.group);
+  const lid = toId(list._id);
+  const io = req.app.get('io');
+
+  const updateData = {
+    listId: lid,
+    groupId: gid,
+    timestamp: Date.now(),
+    action,
+    itemName,
+    itemId
+  };
+
+  if (gid) io.to(gid).emit('listUpdate', updateData);
+  if (lid) io.to(lid).emit('listUpdate', updateData);
+  if (!gid && list.owner) io.to(toId(list.owner)).emit('listUpdate', updateData);
 };
 
-// GET all this user’s lists (owned + shared)
+/* ------------------------------ routes ----------------------------- */
+
+// GET all this user's lists (owned + shared)
 exports.getLists = async (req, res) => {
   try {
-    const ownedLists = await List.find({ owner: req.userId }).populate('items');
-    const groupLists = await List.find({ group: { $ne: null } })
-      .populate('items group')
-      .where('group')
-      .in(await Group.find({ members: req.userId }).distinct('_id'));
+    const userId = toId(req.userId);
 
-    res.json([...ownedLists, ...groupLists]);
+    // groups where the user is a member
+    const myGroupIds = await Group.find({ 'members.user': userId }).distinct('_id');
+
+    const lists = await List.find({
+      $or: [{ owner: userId }, { group: { $in: myGroupIds } }]
+    }).populate('items group');
+
+    res.json(lists);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -44,7 +80,12 @@ exports.getListById = async (req, res) => {
   try {
     const list = await authorizeListAccess(req.params.id, req.userId);
     if (!list) return res.status(403).json({ message: 'Access denied' });
-    await list.populate('items');
+
+    await list.populate({
+      path: 'items',
+      populate: { path: 'addedBy', select: 'username profilePicUrl' }
+    });
+
     res.json(list);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -59,7 +100,10 @@ exports.createList = async (req, res) => {
   try {
     if (group) {
       const g = await Group.findById(group);
-      if (!g || !g.members.includes(req.userId)) {
+      if (!g) return res.status(404).json({ message: 'Group not found' });
+
+      const inGroup = g.members.some(m => toId(m.user) === toId(req.userId));
+      if (!inGroup) {
         return res.status(403).json({ message: 'Not authorized to create list in this group' });
       }
       if (g.list) {
@@ -78,7 +122,8 @@ exports.createList = async (req, res) => {
     await newList.populate('items');
     res.status(201).json(newList);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('❌ Error in createList:', err);
+    res.status(500).json({ message: 'Server error', error: err.stack });
   }
 };
 
@@ -92,8 +137,8 @@ exports.updateList = async (req, res) => {
     if (!list) return res.status(403).json({ message: 'Access denied' });
 
     if (Array.isArray(items)) {
-      const newIds = items.map(i => i.toString());
-      const toRemove = list.items.map(i => i.toString()).filter(oldId => !newIds.includes(oldId));
+      const newIds = items.map(i => toId(i));
+      const toRemove = list.items.map(i => toId(i)).filter(oldId => !newIds.includes(oldId));
       await Promise.all(toRemove.map(itemId => Item.findByIdAndDelete(itemId)));
       list.items = newIds;
     }
@@ -103,7 +148,7 @@ exports.updateList = async (req, res) => {
     await list.save();
     await list.populate('items');
 
-    emitListUpdate(req, list); // ✅ Emit list change
+    emitListUpdate(req, list, 'listUpdated');
     res.json(list);
   } catch (err) {
     console.error('Error updating list:', err);
@@ -120,7 +165,7 @@ exports.deleteList = async (req, res) => {
     await Promise.all(list.items.map(itemId => Item.findByIdAndDelete(itemId)));
     await List.deleteOne({ _id: list._id });
 
-    emitListUpdate(req, list); // ✅ Emit removal
+    emitListUpdate(req, list, 'listDeleted');
     res.json({ message: 'List and its items deleted successfully' });
   } catch (err) {
     console.error(err);
@@ -133,43 +178,62 @@ exports.deleteItemById = async (req, res) => {
   const { itemId } = req.params;
 
   try {
+    let item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+
+    // find the parent list *before* deletion for access + emit
     const list = await List.findOne({ items: itemId }).populate('group');
-    if (!list) return res.status(404).json({ message: 'List not found for this item' });
+    if (!list) {
+      await Item.findByIdAndDelete(itemId);
+      return res.json({ message: 'Item deleted (no list found)' });
+    }
 
-  
-    const hasAccess =
-      list.owner.toString() === req.userId ||
-      (list.group && list.group.members.some(m => m.toString() === req.userId));
+    const owner = toId(list.owner) === toId(req.userId);
+    const member = list.group && isMember(list.group, req.userId);
+    if (!owner && !member) return res.status(403).json({ message: 'Access denied' });
 
-    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+    // audit trail
+    try {
+      item.actionHistory.push({
+        action: 'deleted',
+        userId: req.userId,
+        timestamp: new Date(),
+        previousState: { ...item.toObject() }
+      });
+      await item.save();
+    } catch (err) {
+      if (err.name !== 'VersionError') throw err;
+      return res.json({ message: 'Item already deleted' });
+    }
 
-    list.items = list.items.filter(i => i.toString() !== itemId);
+    // pull from list and delete
+    list.items = list.items.filter(i => toId(i) !== toId(itemId));
     await list.save();
     await Item.findByIdAndDelete(itemId);
 
-    emitListUpdate(req, list); // ✅ notify via socket
-    res.json({ message: 'Item deleted' });
+    emitListUpdate(req, list, 'itemDeleted', item.name, toId(itemId));
+    res.json({ message: 'Item deleted', deletedBy: req.userId, deletedAt: new Date(), itemName: item.name });
   } catch (err) {
     console.error('❌ Failed to delete item:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-
 // POST /api/list
 exports.addItemToList = async (req, res) => {
   const { name, productId, icon, listId } = req.body;
-  console.log('📥 Adding item:', { name, productId, icon });
-
+  if (!name || !productId) {
+    return res.status(400).json({ message: 'Product name and productId are required' });
+  }
   try {
-    const item = new Item({
+    const item = await Item.create({
       name,
       icon,
       product: productId,
       quantity: 1,
-      addedBy: req.userId
+      addedBy: req.userId,
+      barcode: req.body.barcode || ''
     });
-    await item.save();
 
     let list;
     if (listId) {
@@ -177,21 +241,53 @@ exports.addItemToList = async (req, res) => {
       if (!list) return res.status(403).json({ message: 'Access denied' });
     } else {
       list = await List.findOne({ owner: req.userId }).sort({ createdAt: -1 });
-      if (!list) {
-        list = new List({ name: 'My List', owner: req.userId, items: [] });
-        await list.save();
-      }
+      if (!list) list = await List.create({ name: 'My List', owner: req.userId, items: [] });
     }
 
     list.items.push(item._id);
     await list.save();
     await item.populate('product');
 
-    emitListUpdate(req, list); // ✅ Emit item addition
-    res.status(201).json(item);
+    // ProductHistory (best-effort)
+    ProductHistory.create({
+      userId: req.userId,
+      productId,
+      action: 'added',
+      createdAt: new Date()
+    }).catch(e => console.error('Failed to log ProductHistory:', e));
+
+    // Feed into ML training system (best-effort)
+    let mlWarning = null;
+    try {
+      const features = await extractFeaturesForProduct(productId, req.userId, list.group);
+      const featuresArray = [
+        1, // bias term
+        features.isFavorite || 0,
+        features.purchasedBefore || 0,
+        features.timesPurchased || 0,
+        features.recentlyPurchased || 0,
+        features.timesWasRejectedByUser || 0,
+        features.timesWasRejectedByGroup || 0,
+        features.groupPopularity || 0,
+        features.priceScore || 0,
+        features.categoryPopularity || 0
+      ];
+      await TrainingExample.create({
+        userId: req.userId,
+        productId,
+        features: featuresArray,
+        label: 1 // accepted/added
+      });
+    } catch (mlError) {
+      console.error('ML training error:', mlError);
+      mlWarning = 'ML training failed: ' + mlError.message;
+    }
+
+    emitListUpdate(req, list, 'itemAdded', item.name, toId(item._id));
+    res.status(201).json({ item, mlWarning });
   } catch (err) {
     console.error('❌ Failed to add item:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to add item', error: err.message });
   }
 };
 
@@ -199,30 +295,65 @@ exports.addItemToList = async (req, res) => {
 exports.addItemToListById = async (req, res) => {
   const { name, productId, icon } = req.body;
   const listId = req.params.id;
-  console.log('📥 Adding item to list:', listId, { name, productId });
-
+  if (!name || !productId) {
+    return res.status(400).json({ message: 'Product name and productId are required' });
+  }
   try {
-    const item = new Item({
+    const list = await authorizeListAccess(listId, req.userId);
+    if (!list) return res.status(403).json({ message: 'Access denied' });
+
+    const item = await Item.create({
       name,
       icon,
       product: productId,
       quantity: 1,
-      addedBy: req.userId
+      addedBy: req.userId,
+      barcode: req.body.barcode || ''
     });
-    await item.save();
-
-    const list = await authorizeListAccess(listId, req.userId);
-    if (!list) return res.status(403).json({ message: 'Access denied' });
 
     list.items.push(item._id);
     await list.save();
     await item.populate('product');
 
-    emitListUpdate(req, list); // ✅ Emit item addition
-    res.status(201).json(item);
+    // ProductHistory (best-effort)
+    ProductHistory.create({
+      userId: req.userId,
+      productId,
+      action: 'added',
+      createdAt: new Date()
+    }).catch(e => console.error('Failed to log ProductHistory:', e));
+
+    let mlWarning = null;
+    try {
+      const features = await extractFeaturesForProduct(productId, req.userId, list.group);
+      const featuresArray = [
+        1,
+        features.isFavorite || 0,
+        features.purchasedBefore || 0,
+        features.timesPurchased || 0,
+        features.recentlyPurchased || 0,
+        features.timesWasRejectedByUser || 0,
+        features.timesWasRejectedByGroup || 0,
+        features.groupPopularity || 0,
+        features.priceScore || 0,
+        features.categoryPopularity || 0
+      ];
+      await TrainingExample.create({
+        userId: req.userId,
+        productId,
+        features: featuresArray,
+        label: 1
+      });
+    } catch (mlError) {
+      console.error('ML training error:', mlError);
+      mlWarning = 'ML training failed: ' + mlError.message;
+    }
+
+    emitListUpdate(req, list, 'itemAdded', item.name, toId(item._id));
+    res.status(201).json({ item, mlWarning });
   } catch (err) {
     console.error('❌ Failed to add item:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to add item', error: err.message });
   }
 };
 
@@ -235,31 +366,34 @@ exports.updateQuantity = async (req, res) => {
     const item = await Item.findById(itemId);
     if (!item) return res.status(404).json({ message: 'Item not found' });
 
-    item.quantity += change;
+    const list = await List.findOne({ items: itemId }).populate('group');
+    if (!list) return res.status(404).json({ message: 'List not found for this item' });
+
+    const owner = toId(list.owner) === toId(req.userId);
+    const member = list.group && isMember(list.group, req.userId);
+    if (!owner && !member) return res.status(403).json({ message: 'Access denied' });
+
+    item.quantity += Number(change || 0);
 
     if (item.quantity < 1) {
-      await item.remove();
+      // remove from list and delete item
+      list.items = list.items.filter(i => toId(i) !== toId(itemId));
+      await list.save();
+      await Item.findByIdAndDelete(itemId);
 
-      // emit listUpdate to group if item was removed
-      const list = await List.findOne({ items: itemId }).populate('group');
-      if (list) emitListUpdate(req, list);
-
+      emitListUpdate(req, list, 'itemDeleted', item.name, toId(itemId));
       return res.json({ deleted: true });
     }
 
     await item.save();
 
-    // emit listUpdate to group if item was changed
-    const list = await List.findOne({ items: itemId }).populate('group');
-    if (list) emitListUpdate(req, list);
-
+    emitListUpdate(req, list, 'itemUpdated', item.name, toId(itemId));
     res.json(item);
   } catch (err) {
     console.error('❌ Quantity update error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
-
 
 exports.markItemAsBought = async (req, res) => {
   const { id: itemId } = req.params;
@@ -271,29 +405,37 @@ exports.markItemAsBought = async (req, res) => {
     const list = await List.findOne({ items: itemId }).populate('group');
     if (!list) return res.status(404).json({ message: 'List not found for this item' });
 
-    const hasAccess =
-      list.owner.toString() === req.userId ||
-      (list.group && list.group.members.some(m => m.toString() === req.userId));
+    const owner = toId(list.owner) === toId(req.userId);
+    const member = list.group && isMember(list.group, req.userId);
+    if (!owner && !member) return res.status(403).json({ message: 'Access denied' });
 
-    if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
-
-    // سجل في التاريخ
     await PurchaseHistory.create({
       name: item.name,
       product: item.product,
       quantity: item.quantity,
       user: req.userId,
+      group: list.group?._id || null,
       boughtAt: new Date()
     });
 
-    // احذف من القائمة
-    list.items = list.items.filter(i => i.toString() !== itemId);
+    await ProductHistory.create({
+      userId: req.userId,
+      productId: toId(item.product),
+      listId: list._id,
+      action: 'purchased',
+      quantity: item.quantity,
+      metadata: {
+        groupId: list.group?._id || null,
+        boughtAt: new Date()
+      }
+    });
+
+    list.items = list.items.filter(i => toId(i) !== toId(itemId));
     await list.save();
     await Item.findByIdAndDelete(itemId);
 
-    emitListUpdate(req, list);
+    emitListUpdate(req, list, 'itemPurchased', item.name, toId(itemId));
     res.json({ message: 'Item marked as bought and archived' });
-
   } catch (err) {
     console.error('❌ Failed to mark item as bought:', err);
     res.status(500).json({ message: 'Server error' });

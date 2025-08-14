@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useContext, createContext } from 'react';
 import {
   View,
   Text,
@@ -9,47 +9,80 @@ import {
   TextInput,
   SafeAreaView,
   Alert,
-  Button,
+  Image,
+  ActivityIndicator,
+  Dimensions,
+  StatusBar,
+  ScrollView,
 } from 'react-native';
+import { PersonalListProvider } from '../services/PersonalListContext';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { joinRoom, registerGroupUpdates } from '../services/socketEvents';
+import { joinRoom, registerGroupUpdates, registerGroupNotifications } from '../services/socketEvents';
+import { useFocusEffect } from '@react-navigation/native';
+import { apiEventEmitter } from '../services/api';
+import jwt_decode from 'jwt-decode';
+import { useFonts } from 'expo-font';
+import { PlayfairDisplay_700Bold } from '@expo-google-fonts/playfair-display';
+import PersonalListContext from '../services/PersonalListContext';
+
+const { width, height } = Dimensions.get('window');
 
 export default function MainScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [groups, setGroups] = useState([]);
-  const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
   const [locationName, setLocationName] = useState(null);
   const [editLocationVisible, setEditLocationVisible] = useState(false);
   const [manualLocation, setManualLocation] = useState('');
+  const [products, setProducts] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [userNameLoading, setUserNameLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [userLists, setUserLists] = useState([]);
+  const [welcomeType, setWelcomeType] = useState('back'); // 'back' or 'new'
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [compareModalVisible, setCompareModalVisible] = useState(false);
+  const [compareResults, setCompareResults] = useState([]);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareCity, setCompareCity] = useState('');
+  const [tripTypeModalVisible, setTripTypeModalVisible] = useState(false);
+  const [newGroupNotification, setNewGroupNotification] = useState(false);
 
-useEffect(() => {
-  const fetchLocationName = async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Denied', 'Location access is required.');
-      return;
-    }
-    const { coords } = await Location.getCurrentPositionAsync({});
-    const [place] = await Location.reverseGeocodeAsync({
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-    });
-    if (place) {
-      const city = place.city || place.region || place.name;
-      const country = place.country || '';
-      const fullLocation = `${city}, ${country}`;
-      setLocationName(fullLocation);
-      await AsyncStorage.setItem('locationName', city); // ← 🔥 זה חשוב
-    }
-  };
-  fetchLocationName();
-}, []);
+  const { personalList, setPersonalList, lastBought, lastStore } = useContext(PersonalListProvider._context || require('../services/PersonalListContext').default);
 
+  const [fontsLoaded] = useFonts({
+    PlayfairDisplay_700Bold,
+  });
+
+  useEffect(() => {
+    const fetchLocationName = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location access is required.');
+        return;
+      }
+      const { coords } = await Location.getCurrentPositionAsync({});
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      });
+      if (place) {
+        const city = place.city || place.region || place.name;
+        const country = place.country || '';
+        const fullLocation = `${city}, ${country}`;
+        setLocationName(fullLocation);
+        await AsyncStorage.setItem('locationName', city);
+      }
+    };
+    fetchLocationName();
+  }, []);
 
   const logout = async () => {
     await AsyncStorage.removeItem('token');
@@ -57,12 +90,7 @@ useEffect(() => {
   };
 
   const fetchGroups = async () => {
-    try {
-      const res = await api.get('/groups/my');
-      setGroups(res.data);
-    } catch (err) {
-      console.error('Fetch groups error:', err);
-    }
+    // Group fetching logic for future milestones
   };
 
   useEffect(() => {
@@ -71,6 +99,16 @@ useEffect(() => {
       if (!token) navigation.replace('Login');
       else fetchGroups();
     };
+    
+    // Handle group notifications
+    const unsubscribe = registerGroupNotifications((data) => {
+      if (data.groupCreated) {
+        setNewGroupNotification(true);
+      }
+    });
+
+    checkSession();
+    return () => unsubscribe();
     checkSession();
   }, []);
 
@@ -93,9 +131,9 @@ useEffect(() => {
               },
             ]);
           }}
-          style={{ marginRight: 16 }}
+          style={styles.logoutButton}
         >
-          <Icon name="log-out-outline" size={34} color="#000" />
+          <Ionicons name="log-out-outline" size={24} color="#2E7D32" />
         </TouchableOpacity>
       ),
     });
@@ -110,257 +148,920 @@ useEffect(() => {
     return unsubscribe;
   }, []);
 
+  // Fetch user name for welcome message
+  useEffect(() => {
+    const getUserName = async () => {
+      const token = await AsyncStorage.getItem('token');
+      if (token) {
+        try {
+          const decoded = jwt_decode(token);
+          setUserName(decoded.username || 'User');
+        } catch (e) {
+          setUserName('User');
+        }
+      } else {
+        setUserName('User');
+      }
+      setUserNameLoading(false);
+    };
+    getUserName();
+  }, []);
+
+  // Server-side search functionality
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+
+  // Debounced search to avoid excessive API calls
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (searchTerm.trim() === '') {
+        // Reset to normal pagination when search is cleared
+        setFilteredProducts(products);
+        setSearchResults([]);
+        // Reset pagination state
+        setOffset(products.length);
+        setHasMore(true);
+        console.log('🔍 Search cleared, reset to pagination mode');
+      } else {
+        performSearch(searchTerm);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, products]);
+
+  const performSearch = async (query) => {
+    try {
+      setSearchLoading(true);
+      console.log('🔍 Searching for:', query);
+      
+      // Search the ENTIRE database without pagination limits for search
+      // Use a higher limit to get more comprehensive search results
+      const response = await api.get(`/products?q=${encodeURIComponent(query)}&limit=500`);
+      const searchResults = response.data || [];
+      
+      console.log('🔍 Search results:', searchResults.length, 'products found');
+      
+      // Filter to only show products with valid images
+      const validResults = searchResults.filter(product => {
+        const img = product.img || product.image;
+        return img && img !== '' && img !== 'https://via.placeholder.com/100' && img !== 'null';
+      });
+      
+      console.log('🔍 Valid results after image filtering:', validResults.length, 'products');
+      
+      setSearchResults(validResults);
+      setFilteredProducts(validResults);
+      setSearchLoading(false);
+    } catch (error) {
+      console.error('Error searching products:', error);
+      setSearchLoading(false);
+      // Fallback to client-side filtering if server search fails
+      const filtered = products.filter(product =>
+        product.name.toLowerCase().includes(query.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    }
+  };
+
+  // Fetch products from /api/products on mount - OPTIMIZED for performance
+  const fetchProducts = useCallback(async (reset = false) => {
+    // Don't fetch more products if we're currently searching
+    if (searchTerm.trim()) {
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('📦 Fetching products:', reset ? 'initial' : 'pagination', 'offset:', reset ? 0 : offset);
+      
+      // Fetch products with pagination
+      const res = await api.get(`/products?limit=20&offset=${reset ? 0 : offset}`);
+      const products = res.data || [];
+      
+      console.log('📦 Received products:', products.length);
+      
+      // Filter to only show products with valid images (same as ALL card)
+      const validProducts = products.filter(product => {
+        const img = product.img || product.image;
+        return img && img !== '' && img !== 'https://via.placeholder.com/100' && img !== 'null';
+      });
+      
+      console.log('📦 Valid products:', validProducts.length);
+      
+      if (reset) {
+        setProducts(validProducts);
+        setFilteredProducts(validProducts);
+        setOffset(20);
+        setHasMore(validProducts.length === 20);
+        console.log('📦 Reset: loaded', validProducts.length, 'products, hasMore:', validProducts.length === 20);
+      } else {
+        setProducts(prev => [...prev, ...validProducts]);
+        setFilteredProducts(prev => [...prev, ...validProducts]);
+        setOffset(prev => prev + 20);
+        setHasMore(validProducts.length === 20);
+        console.log('📦 Pagination: added', validProducts.length, 'products, total:', products.length + validProducts.length, 'hasMore:', validProducts.length === 20);
+      }
+    } catch (err) {
+      console.error('❌ Error fetching products:', err);
+      setHasMore(false);
+    }
+    setIsLoading(false);
+  }, [offset, searchTerm]);
+
+  // On mount, fetch first 20 products
+  useEffect(() => {
+    fetchProducts(true);
+  }, []);
+
+  // On scroll to end, fetch more products (Instagram-style infinite scroll)
+  const handleEndReached = () => {
+    console.log('📜 End reached - isLoading:', isLoading, 'hasMore:', hasMore, 'searchTerm:', searchTerm.trim());
+    
+    // Only fetch more if not searching and not already loading
+    if (!isLoading && hasMore && !searchTerm.trim()) {
+      console.log('📜 Fetching more products...');
+      fetchProducts();
+    } else if (searchTerm.trim()) {
+      console.log('📜 Skipping pagination - currently searching');
+    } else if (isLoading) {
+      console.log('📜 Skipping pagination - already loading');
+    } else if (!hasMore) {
+      console.log('📜 Skipping pagination - no more products');
+    }
+  };
+
+  const handleAddToCart = async (product) => {
+    try {
+      let targetListId = null;
+
+      if (userLists.length > 0) {
+        targetListId = userLists[0]._id;
+      } else {
+        // Create a default list if none exists
+        const response = await api.post('/lists', { name: 'My Shopping List' });
+        targetListId = response.data._id;
+        // Refresh user lists
+        const res = await api.get('/lists');
+        setUserLists(res.data || []);
+      }
+
+      await addProductToList(product, targetListId);
+      showToast(`${product.name} added!`);
+      navigation.navigate('MyList', { listId: targetListId });
+    } catch (err) {
+      console.error('Error adding product:', err);
+      Alert.alert('Error', 'Failed to add product. Please try again.');
+    }
+  };
+
+  const addProductToList = async (product, listId) => {
+    try {
+      await api.post(`/lists/${listId}/items`, {
+        name: product.name,
+        icon: product.img,
+        productId: product._id,
+      });
+
+      // Show a quick success feedback instead of alert
+      // showToast(`${product.name} added!`); // This is now handled in handleAddToCart
+
+    } catch (err) {
+      console.error('Error adding product to list:', err);
+      showToast('Failed to add product');
+    }
+  };
+
+  // Toast notification system
+  const [toast, setToast] = useState({ visible: false, message: '' });
+
+  const showToast = (message) => {
+    setToast({ visible: true, message });
+    setTimeout(() => setToast({ visible: false, message: '' }), 2000);
+  };
+
+  // Add product to personal list
+  const addToPersonalList = (product) => {
+    setPersonalList(prev => {
+      // Check if product already exists (by _id or name)
+      const exists = prev.some(item => item._id === product._id || item.name === product.name);
+      if (exists) {
+        // If exists, increment quantity
+        return prev.map(item =>
+          (item._id === product._id || item.name === product.name)
+            ? { ...item, quantity: (item.quantity || 1) + 1 }
+            : item
+        );
+      } else {
+        // If not, add new product with quantity 1
+        return [...prev, { ...product, quantity: 1 }];
+      }
+    });
+    showToast(`${product.name} added to My List!`);
+  };
+
+  const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
+  const renderProductCard = ({ item }) => (
+    <View style={styles.productCard}>
+
+      <Image
+        source={{ uri: item.img && (item.img.startsWith('http') || item.img.startsWith('data:image/')) ? item.img : PLACEHOLDER_IMAGE }}
+        style={styles.productImage}
+        resizeMode="cover"
+      />
+      <View style={styles.productInfo}>
+        <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => addToPersonalList(item)}
+        >
+          <Ionicons name="add" size={20} color="#FFFFFF" />
+          <Text style={styles.addButtonText}>Add</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  useEffect(() => {
+    // Listen for global logout event
+    const handleLogout = () => logout();
+    apiEventEmitter.on('logout', handleLogout);
+    return () => {
+      apiEventEmitter.off('logout', handleLogout);
+    };
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (navigation && navigation.getParam) {
+        const type = navigation.getParam('loginType', 'back');
+        setWelcomeType(type);
+      } else if (navigation && navigation.route && navigation.route.params) {
+        setWelcomeType(navigation.route.params.loginType || 'back');
+      }
+    }, [navigation])
+  );
+
+  if (!fontsLoaded) {
+    return null; // Or a loading spinner
+  }
+
+  const handleComparePrices = async () => {
+    setCompareModalVisible(true);
+    setCompareLoading(true);
+    try {
+      let city = compareCity;
+      if (!city) {
+        // Try to get from locationName or prompt user
+        city = locationName ? locationName.split(',')[0] : '';
+        if (!city) {
+          city = await new Promise(resolve => {
+            Alert.prompt('Enter City', 'Enter your city (Hebrew supported):', resolve);
+          });
+        }
+      }
+      const barcodes = products.map(p => p.barcode).filter(Boolean);
+      const res = await api.post('/compare', { city, barcodes });
+      setCompareResults(res.data.slice(0, 5));
+    } catch (err) {
+      setCompareResults([]);
+    }
+    setCompareLoading(false);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      {locationName && (
-        <Text style={{ textAlign: 'center', color: '#666', marginBottom: 10 }}>
-          📍 Your Location: {locationName}
-        </Text>
+      <StatusBar backgroundColor="#2E7D32" barStyle="light-content" />
+
+      {/* Header Section */}
+      <View style={styles.header}>
+        <View style={styles.welcomeSection}>
+          <Text style={[styles.welcomeText, { fontFamily: 'PlayfairDisplay_700Bold', fontSize: 38, color: '#4B2E83', letterSpacing: 1 }]}>Welcome</Text>
+          {locationName && (
+            <View style={styles.locationContainer}>
+              <Ionicons name="location" size={16} color="#666" />
+              <Text style={styles.locationText}>{locationName}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            value={searchTerm}
+            onChangeText={setSearchTerm}
+            placeholderTextColor="#999"
+          />
+          {searchLoading && (
+            <ActivityIndicator size="small" color="#2E7D32" style={styles.searchLoading} />
+          )}
+          {searchTerm.length > 0 && !searchLoading && (
+            <TouchableOpacity onPress={() => setSearchTerm('')}>
+              <Ionicons name="close-circle" size={20} color="#666" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Products Section */}
+      <View style={styles.productsSection}>
+        <Text style={styles.sectionTitle}>🛒 Suggested Products</Text>
+
+        <FlatList
+          data={filteredProducts}
+          keyExtractor={(item, index) => item._id || index.toString()}
+          renderItem={renderProductCard}
+          numColumns={2}
+          columnWrapperStyle={styles.productRow}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.productsList}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              {searchTerm.trim() ? (
+                <>
+                  <Ionicons name="search-outline" size={48} color="#CCC" />
+                  <Text style={styles.emptyText}>No products found for "{searchTerm}"</Text>
+                  <Text style={styles.emptySubtext}>Try a different search term</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="search-outline" size={48} color="#CCC" />
+                  <Text style={styles.emptyText}>No products found</Text>
+                  <Text style={styles.emptySubtext}>Try adjusting your search</Text>
+                </>
+              )}
+            </View>
+          }
+          ListFooterComponent={
+            isLoading && !searchTerm.trim() ? (
+              <View style={styles.loadingFooter}>
+                <ActivityIndicator size="small" color="#2E7D32" />
+                <Text style={styles.loadingFooterText}>Loading more products...</Text>
+              </View>
+            ) : !hasMore && !searchTerm.trim() && filteredProducts.length > 0 ? (
+              <View style={styles.endFooter}>
+                <Text style={styles.endFooterText}>You've reached the end! 🎉</Text>
+                <Text style={styles.endFooterSubtext}>All products loaded</Text>
+              </View>
+            ) : null
+          }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.3}
+          refreshing={isLoading && filteredProducts.length === 0}
+          onRefresh={() => {
+            console.log('🔄 Pull to refresh triggered');
+            setOffset(0);
+            setHasMore(true);
+            fetchProducts(true);
+          }}
+        />
+      </View>
+
+      {/* Toast Notification */}
+      {toast.visible && (
+        <View style={styles.toast}>
+          <Text style={styles.toastText}>{toast.message}</Text>
+        </View>
       )}
 
-      <Text style={styles.subtitle}>👥 My Groups</Text>
-      <FlatList
-        data={groups}
-        keyExtractor={(item) => item._id}
-        renderItem={({ item }) => (
-  <TouchableOpacity
-    style={styles.groupCard}
-    onPress={() =>
-      navigation.navigate('ShoppingList', {
-        listId: item.list?._id,
-        listName: `${item.name}'s Shared List`,
-          location: locationName,   
-      })
-    }
-  >
-    <View style={styles.groupCardLeft}>
-      <Icon name="people-outline" size={28} color="#2E7D32" style={{ marginRight: 12 }} />
-      <Text style={styles.groupCardName}>{item.name}</Text>
-    </View>
-    <Icon name="chevron-forward" size={20} color="#888" />
-  </TouchableOpacity>
-)}
-
-        ListEmptyComponent={
-          <Text style={styles.item}>You don't belong to any group yet.</Text>
-        }
-      />
-
-      {/* Bottom Navigation Bar */}
+      {/* Bottom Navigation */}
       <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 10 }]}>
         <TouchableOpacity
           style={styles.navButton}
-          onPress={() => setCreateGroupModalVisible(true)}
+          onPress={() => navigation.navigate('MyList')}
         >
-          <Icon name="add-circle" size={24} color="#fff" />
-          <Text style={styles.navButtonText}>Create</Text>
+          <Ionicons name="list" size={24} color="#2E7D32" />
+          <Text style={styles.navButtonText}>My List</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.navButton}
-          onPress={() => setEditLocationVisible(true)}
+          onPress={() => {
+            navigation.navigate('GroupList');
+            setNewGroupNotification(false); // Clear notification when visiting
+          }}
         >
-          <Icon name="location-outline" size={24} color="#fff" />
-          <Text style={styles.navButtonText}>Location</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navButton}
-          onPress={() => navigation.navigate('GroupManager')}
-        >
-          <Icon name="people-circle-outline" size={24} color="#fff" />
+          <View style={styles.navButtonContainer}>
+            <Ionicons name="people" size={24} color="#2E7D32" />
+            {newGroupNotification && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationText}>!</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.navButtonText}>Groups</Text>
+        </TouchableOpacity>
+
+
+
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={() => setTripTypeModalVisible(true)}
+        >
+          <Ionicons name="storefront" size={24} color="#2E7D32" />
+          <Text style={styles.navButtonText}>Stores</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Create Group Modal */}
-      <Modal
-        visible={createGroupModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCreateGroupModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create New Group</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Group Name"
-              value={newGroupName}
-              onChangeText={setNewGroupName}
-            />
-            <View style={styles.modalButtons}>
-              <Button
-                title="Cancel"
-                onPress={() => setCreateGroupModalVisible(false)}
-              />
-              <Button
-                title="Create"
-                onPress={async () => {
-                  if (!newGroupName.trim()) {
-                    Alert.alert('Enter a group name');
-                    return;
-                  }
-                  try {
-                    await api.post('/groups', { name: newGroupName.trim() });
-                    setNewGroupName('');
-                    setCreateGroupModalVisible(false);
-                    fetchGroups();
-                  } catch (err) {
-                    console.error('Group create error:', err);
-                    Alert.alert('Error creating group');
-                  }
-                }}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
 
-      {/* Edit Location Modal */}
-      <Modal
-        visible={editLocationVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setEditLocationVisible(false)}
+      {/* Removed Compare Prices button from home page as per user request */}
+
+      {/* Trip Type Selection Modal */}
+      <Modal 
+        visible={tripTypeModalVisible} 
+        animationType="slide" 
+        transparent={true}
+        onRequestClose={() => setTripTypeModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Location</Text>
-            <Button
-              title="📍 Use Current Location"
-              onPress={async () => {
-                const { status } = await Location.requestForegroundPermissionsAsync();
-                if (status !== 'granted') {
-                  Alert.alert('Permission Denied', 'Location access is required.');
-                  return;
-                }
-                const { coords } = await Location.getCurrentPositionAsync({});
-                const [place] = await Location.reverseGeocodeAsync(coords);
-                const city = place.city || place.region || place.name;
-                const country = place.country || '';
-                setLocationName(`${city}, ${country}`);
-                setEditLocationVisible(false);
+        <View style={styles.modalOverlay}>
+          <View style={styles.tripTypeModal}>
+            <Text style={styles.modalTitle}>Choose Trip Type</Text>
+            <Text style={styles.modalSubtitle}>Select how you want to compare store prices</Text>
+            
+            <TouchableOpacity 
+              style={styles.tripOption}
+              onPress={() => {
+                setTripTypeModalVisible(false);
+                navigation.navigate('MyList'); // Navigate to Personal List Page
               }}
-            />
-            <Text style={{ marginVertical: 10, textAlign: 'center' }}>OR</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter location manually"
-              value={manualLocation}
-              onChangeText={setManualLocation}
-            />
-            <View style={styles.modalButtons}>
-              <Button title="Cancel" onPress={() => setEditLocationVisible(false)} />
-              <Button
-                title="Set"
-                onPress={async () => {
-                  try {
-                    const results = await Location.geocodeAsync(manualLocation.trim());
-                    if (results.length === 0) {
-                      Alert.alert('Invalid Location', 'Please enter a real city or address.');
-                      return;
-                    }
-                    const { latitude, longitude } = results[0];
-                    const [place] = await Location.reverseGeocodeAsync({ latitude, longitude });
-                    const city = place.city || place.region || place.name;
-                    const country = place.country || '';
-                    setLocationName(`${city}, ${country}`);
-                        await AsyncStorage.setItem('locationName', city); // ← הוספה חשובה
-
-                    setEditLocationVisible(false);
-                  } catch (err) {
-                    Alert.alert('Error', 'Unable to validate location.');
-                    console.error(err);
-                  }
-                }}
-              />
-            </View>
+            >
+              <View style={styles.tripOptionIcon}>
+                <Ionicons name="person" size={32} color="#1976D2" />
+              </View>
+              <Text style={styles.tripOptionText}>Personal Trip</Text>
+              <Text style={styles.tripOptionSubtext}>Compare prices for your personal shopping list</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.tripOption}
+              onPress={() => {
+                setTripTypeModalVisible(false);
+                navigation.navigate('GroupList'); // Navigate to Group List Page
+              }}
+            >
+              <View style={styles.tripOptionIcon}>
+                <Ionicons name="people" size={32} color="#4CAF50" />
+              </View>
+              <Text style={styles.tripOptionText}>Group Trip</Text>
+              <Text style={styles.tripOptionSubtext}>Compare prices for group shopping</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setTripTypeModalVisible(false)}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
+
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingBottom: 70, backgroundColor: '#f9f9f9' },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginTop: 20,
-    marginBottom: 10,
-    color: '#444',
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    width: '100%',
   },
-  item: { fontSize: 16, color: '#333' },
-  groupItem: { fontSize: 16, color: '#1565C0', marginBottom: 6 },
+  header: {
+    backgroundColor: '#2E7D32',
+    paddingTop: 20,
+    paddingBottom: 20,
+    paddingHorizontal: '5%',
+    width: '100%',
+  },
+  welcomeSection: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#E8F5E8',
+    marginLeft: 4,
+  },
+  logoutButton: {
+    padding: 8,
+    marginRight: 16,
+  },
+  searchContainer: {
+    paddingHorizontal: '5%',
+    paddingVertical: 15,
+    backgroundColor: '#FFFFFF',
+    width: '100%',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    width: '100%',
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+  },
+  searchLoading: {
+    marginLeft: 10,
+  },
+  productsSection: {
+    flex: 1,
+    paddingHorizontal: '5%',
+    width: '100%',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    marginVertical: 15,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  productsList: {
+    paddingBottom: 20,
+    width: '100%',
+  },
+  productRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    // width: '100%', // Remove if causing layout issues
+  },
+  productCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    flex: 1,
+    marginHorizontal: 4,
+    marginVertical: 8,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    alignItems: 'center',
+    padding: 12,
+    position: 'relative',
+    height: 220, // Fixed height for alignment
+  },
+  heartIcon: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+  },
+  productImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  productInfo: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  productName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  productPrice: {
+    fontSize: 14,
+    color: '#2E7D32',
+    marginBottom: 8,
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2E7D32',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
+  },
   bottomNav: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    backgroundColor: '#2E7D32',
-    paddingTop: 10,
+    backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#ccc',
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    borderColor: '#eee',
+    paddingVertical: 10,
+    width: '100%',
   },
-  navButton: { alignItems: 'center', justifyContent: 'center' },
-  navButtonText: { color: '#fff', fontSize: 12, marginTop: 2 },
-  modalBackdrop: {
+  navButton: {
+    alignItems: 'center',
     flex: 1,
+  },
+  navButtonContainer: {
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -8,
+    backgroundColor: '#FF4444',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  modalContent: {
-    width: '85%',
-    backgroundColor: '#fff',
-    borderRadius: 10,
+  notificationText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  navButtonText: {
+    fontSize: 12,
+    color: '#2E7D32',
+    marginTop: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
   },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    width: '80%',
+    maxWidth: 300,
+  },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 10,
     textAlign: 'center',
-    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 20,
+    textAlign: 'center',
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 6,
-    padding: 10,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
     marginBottom: 20,
   },
   modalButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-  },groupCard: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  backgroundColor: '#fff',
-  padding: 16,
-  marginBottom: 10,
-  borderRadius: 12,
-  elevation: 2, // for Android shadow
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.1,
-  shadowRadius: 3,
-},
-
-groupCardLeft: {
-  flexDirection: 'row',
-  alignItems: 'center',
-},
-
-groupCardName: {
-  fontSize: 16,
-  fontWeight: '600',
-  color: '#333',
-},
-
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginHorizontal: 5,
+  },
+  cancelButton: {
+    backgroundColor: '#F5F5F5',
+  },
+  createButton: {
+    backgroundColor: '#2E7D32',
+  },
+  cancelButtonText: {
+    color: '#666',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  toast: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: '#2E7D32',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  compareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2E7D32',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginVertical: 10,
+    marginHorizontal: '5%',
+    alignSelf: 'center',
+  },
+  compareButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    padding: 20,
+    alignItems: 'center',
+  },
+  resultCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 10,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  storeName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  storeAddress: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  storeDistance: {
+    fontSize: 14,
+    color: '#1976D2',
+    marginBottom: 4,
+  },
+  totalPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+  },
+  closeButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginTop: 20,
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  tripTypeModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 30,
+    width: '90%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  tripOption: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 15,
+    padding: 20,
+    marginVertical: 10,
+    width: '100%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  tripOptionIcon: {
+    marginBottom: 10,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#E0F2F7',
+  },
+  tripOptionText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  tripOptionSubtext: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  cancelButton: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  loadingFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+  },
+  loadingFooterText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#666',
+  },
+  endFooter: {
+    alignItems: 'center',
+    paddingVertical: 30,
+    paddingHorizontal: 16,
+  },
+  endFooterText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginBottom: 4,
+  },
+  endFooterSubtext: {
+    fontSize: 14,
+    color: '#999',
+  },
 });

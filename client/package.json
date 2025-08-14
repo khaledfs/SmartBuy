@@ -4,12 +4,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "start": "expo start --quiet",
+    "start:verbose": "expo start",
+    "android": "expo start --android --quiet",
+    "ios": "expo start --ios --quiet",
+    "web": "expo start --web --quiet"
   },
   "dependencies": {
+    "@expo-google-fonts/playfair-display": "^0.2.3",
     "@expo/metro-runtime": "~5.0.4",
     "@expo/vector-icons": "^14.1.0",
     "@react-native-async-storage/async-storage": "2.1.2",
@@ -18,7 +20,9 @@
     "@react-navigation/stack": "^7.2.9",
     "axios": "^1.10.0",
     "cheerio": "^1.1.0",
-    "expo": "^53.0.9",
+    "eventemitter3": "^5.0.1",
+    "expo": "^53.0.17",
+    "expo-font": "^11.5.0",
     "expo-image-picker": "16.1.4",
     "expo-location": "~18.1.5",
     "expo-status-bar": "2.2.3",
@@ -47,6 +51,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@react-native-community/cli": "^19.1.0",
     "typescript": "^5.8.3"
   },
   "private": true,

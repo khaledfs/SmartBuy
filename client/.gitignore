@@ -4,4 +4,3 @@ client/node_modules/
 server/node_modules/
 *.log
 .env
-client/screens/WhereToBuy.js

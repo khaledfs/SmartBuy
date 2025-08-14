@@ -1,13 +1,22 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import LottieView from 'lottie-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TransitionScreen({ navigation }) {
   useEffect(() => {
+    const checkAndNavigate = async () => {
+      let loginType = 'back';
+      const justSignedUp = await AsyncStorage.getItem('justSignedUp');
+      if (justSignedUp) {
+        loginType = 'new';
+        await AsyncStorage.removeItem('justSignedUp');
+      }
+      navigation.replace('Main', { loginType });
+    };
     const timer = setTimeout(() => {
-      navigation.replace('Main');
-    }, 2500); // Adjust duration to match animation
-
+      checkAndNavigate();
+    }, 2500); // or your animation duration
     return () => clearTimeout(timer);
   }, [navigation]);
 

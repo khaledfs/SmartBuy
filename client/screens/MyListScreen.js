@@ -1,456 +1,483 @@
 // client/screens/MyListScreen.js
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  Button,
-  Alert,
-  Image,
-  Modal,
-  TextInput,
-  SafeAreaView,
-} from 'react-native';
-import LottieView from 'lottie-react-native';
-import api from '../services/api';
-import Icon from 'react-native-vector-icons/Ionicons';
-import { Swipeable } from 'react-native-gesture-handler';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { joinRoom, registerListUpdates } from '../services/socketEvents';
+import React, { useContext, useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, SafeAreaView, Image, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import PersonalListContext from '../services/PersonalListContext';
+import { PersonalListProvider } from '../services/PersonalListContext';
 
-export default function MyListScreen({ navigation, route }) {
-  const {
-    listId,
-    listName: initialName,
-    items: parentItems,
-    setItems: updateParentItems,
-    onDelete,
-    location,
-  } = route.params || {};
+const CARD_MARGIN = 12;
 
-  const [rawItems, setRawItems] = useState(parentItems || []);
-  const [suggestions, setSuggestions] = useState([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [listName, setListName] = useState(initialName || '');
-  const [locationCity, setLocationCity] = useState('');
+export default function MyListScreen({ navigation }) {
+  const { 
+    personalList, 
+    setPersonalList, 
+    lastBought, 
+    lastStore, 
+    tripHistory, 
+    selectedTrip,
+    selectTrip,
+    clearSelectedTrip
+  } = useContext(PersonalListProvider._context || require('../services/PersonalListContext').default);
+  
+  const [activeTab, setActiveTab] = useState('current'); // 'current' or 'lastBought'
+  const [showTripHistory, setShowTripHistory] = useState(false);
+  
+  const items = personalList || [];
+  const lastBoughtItems = lastBought || [];
+  const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 
-  useEffect(() => {
-    AsyncStorage.getItem('locationName')
-      .then(city => setLocationCity(city || ''))
-      .catch(() => {});
-  }, []);
+  // Handler for Compare Prices button
+  const handleComparePrices = () => {
+    const products = items.map(item => ({
+      barcode: item.barcode || '',
+      name: item.name,
+      quantity: item.quantity || 1,
+      image: item.img || item.icon, // Add the image field like group trip
+      img: item.img || item.icon, // Also preserve the img field for consistency
+      icon: item.img || item.icon // Also preserve the icon field
+    }));
+    navigation.navigate('WhereToBuy', {
+      source: 'personal',
+      products,
+      tripType: 'personal',
+    });
+  };
 
-  useEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
+  // Increase quantity
+  const increaseQty = (item) => {
+    setPersonalList(list => list.map(p =>
+      (p._id === item._id || p.name === item.name)
+        ? { ...p, quantity: (p.quantity || 1) + 1 }
+        : p
+    ));
+  };
+
+  // Decrease quantity (remove if 0)
+  const decreaseQty = (item) => {
+    setPersonalList(list => {
+      return list
+        .map(p =>
+          (p._id === item._id || p.name === item.name)
+            ? { ...p, quantity: (p.quantity || 1) - 1 }
+            : p
+        )
+        .filter(p => (p.quantity || 1) > 0);
+    });
+  };
+
+  // Remove item
+  const removeItem = (item) => {
+    setPersonalList(list => list.filter(p => !(p._id === item._id || p.name === item.name)));
+  };
+
+  // Render each item in the personal list as a card (with controls)
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <TouchableOpacity
+        style={styles.deleteButton}
+        onPress={() => removeItem(item)}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="trash" size={22} color="#FF6B6B" />
+      </TouchableOpacity>
+      <Image
+        source={{ uri: item.img && (item.img.startsWith('http') || item.img.startsWith('data:image/')) ? item.img : PLACEHOLDER_IMAGE }}
+        style={styles.image}
+        resizeMode="cover"
+      />
+      <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+      <View style={styles.qtyRow}>
         <TouchableOpacity
-          onPress={() => {
-            Alert.alert(
-              'Logout',
-              'Are you sure you want to logout?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Logout',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await AsyncStorage.removeItem('token');
-                    navigation.replace('Login');
-                  },
-                },
-              ]
-            );
-          }}
-          style={{ marginRight: 16 }}
+          style={styles.qtyButton}
+          onPress={() => decreaseQty(item)}
         >
-          <Icon name="log-out-outline" size={34} color="#000" />
+          <Ionicons name="remove" size={22} color="#2E7D32" />
         </TouchableOpacity>
-      ),
-    });
-  }, [navigation]);
+        <Text style={styles.qtyText}>x{item.quantity || 1}</Text>
+        <TouchableOpacity
+          style={styles.qtyButton}
+          onPress={() => increaseQty(item)}
+        >
+          <Ionicons name="add" size={22} color="#2E7D32" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
-  useEffect(() => {
-    api.get('/suggestions')
-      .then(res => setSuggestions(res.data?.suggestions || []))
-      .catch(err => console.error(err));
-  }, []);
+  // Render each item in the last bought list as a simplified card (read-only)
+  const renderItem2 = ({ item }) => (
+    <View style={styles.card}>
+      <Image
+        source={{ uri: item.img && (item.img.startsWith('http') || item.img.startsWith('data:image/')) ? item.img : PLACEHOLDER_IMAGE }}
+        style={styles.image}
+        resizeMode="cover"
+      />
+      <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+    </View>
+  );
 
-  useEffect(() => {
-    if (listId && !parentItems) {
-      api.get(`/lists/${listId}`)
-        .then(res => {
-          setRawItems(res.data.items);
-          setListName(res.data.name);
-        })
-        .catch(err => console.error(err));
-    }
-  }, [listId, parentItems]);
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', async () => {
-      if (listId) {
-        try {
-          const { data } = await api.get(`/lists/${listId}`);
-          setRawItems(data.items);
-        } catch (err) {
-          console.error('refresh list error:', err);
-        }
-      }
-    });
-    return unsubscribe;
-  }, [navigation, listId]);
-
-  useEffect(() => {
-    if (listId) {
-      joinRoom(listId);
-    }
-  }, [listId]);
-
-  useEffect(() => {
-    const unsubscribe = registerListUpdates(() => {
-      if (listId) {
-        api.get(`/lists/${listId}`)
-          .then(res => setRawItems(res.data.items))
-          .catch(err => console.error('Socket update failed:', err));
-      }
-    });
-    return unsubscribe;
-  }, [listId]);
-
-  const groupedItems = useMemo(() => {
-    const m = {};
-    rawItems.forEach(it => {
-      if (!m[it.name]) {
-        const sug = suggestions.find(s => it.name.includes(s.name) || s.name.includes(it.name));
-        m[it.name] = {
-          name: it.name,
-          icon: it.icon || it.img,
-          quantity: it.quantity || 1,
-          ids: [it._id],
-        };
-      } else {
-        m[it.name].quantity += it.quantity || 1;
-        m[it.name].ids.push(it._id);
-      }
-    });
-    return Object.values(m);
-  }, [rawItems, suggestions]);
-
-  const updateQuantity = async (itemId, newQuantity, currentQuantity) => {
-    try {
-      const change = newQuantity - currentQuantity;
-      const res = await api.patch(`/list/item/${itemId}/quantity`, { change });
-      const { data } = await api.get(`/lists/${listId}`);
-      setRawItems(data.items);
-    } catch (err) {
-      console.error('Update quantity error:', err?.response?.data || err.message);
-    }
+  // Render trip history item
+  const renderTripHistoryItem = ({ item }) => {
+    const tripDate = new Date(item.completedAt).toLocaleDateString();
+    const tripTime = new Date(item.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    return (
+      <TouchableOpacity 
+        style={[styles.tripCard, selectedTrip?.id === item.id && styles.selectedTripCard]}
+        onPress={() => selectTrip(item.id)}
+      >
+        <View style={styles.tripHeader}>
+          <Text style={styles.tripTitle}>Trip #{item.tripNumber}</Text>
+          <Text style={styles.tripDate}>{tripDate} at {tripTime}</Text>
+        </View>
+        {item.store && (
+          <Text style={styles.tripStore}>
+            {item.store.branch || item.store.storeName} - {item.items.length} items
+          </Text>
+        )}
+        {item.store?.totalPrice && (
+          <Text style={styles.tripPrice}>Total: ₪{item.store.totalPrice}</Text>
+        )}
+      </TouchableOpacity>
+    );
   };
 
-  const handleIncrement = async (group) => {
-    try {
-      await handleAddItem(group.name);  
-    } catch (err) {
-      console.error('Increment via add failed:', err);
-    }
-  };
-
-  const handleDecrement = async (group) => {
-    const name = group.name;
-    const product = suggestions.find(p => p.name === name);
-    if (!product) return;
-
-    try {
-      const existingItem = rawItems.find(i => i.name === name);
-      if (!existingItem) return;
-
-      if (existingItem.quantity === 1) {
-        await api.delete(`/list/item/${existingItem._id}`);
-        setRawItems(prev => prev.filter(i => i._id !== existingItem._id));
-      } else {
-        const res = await api.patch(`/list/item/${existingItem._id}/quantity`, { change: -1 });
-        const updatedItem = res.data;
-        setRawItems(prev =>
-          prev.map(i => (i._id === existingItem._id ? updatedItem : i))
-        );
-      }
-    } catch (err) {
-      console.error('Decrement via inverse-add failed:', err);
-    }
-  };
-
-  const handleAddItem = async (name) => {
-    const product = suggestions.find(p => p.name === name);
-    if (!product) return;
-
-    try {
-      let res;
-      if (listId) {
-        res = await api.post(`/lists/${listId}/items`, {
-          name: product.name,
-          icon: product.img,
-          productId: product._id
-        });
-      } else {
-        res = await api.post('/list', {
-          name: product.name,
-          icon: product.img,
-          productId: product._id
-        });
-      }
-
-      const newItem = res.data;
-      setRawItems(prev => [...prev, newItem]);
-
-    } catch (error) {
-      console.error('Add + save error:', error?.response?.data || error.message);
-    }
-  };
-
-  const handleSaveList = async () => {
-    if (!listName.trim()) {
-      Alert.alert('Invalid Name', 'Enter a valid list name.');
-      return;
-    }
-    try {
-      const payload = {
-        name: listName.trim(),
-        items: rawItems.map(i => i._id),
-      };
-      if (listId) await api.patch(`/lists/${listId}`, payload);
-      else await api.post('/lists', payload);
-      setModalVisible(false);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Error', 'Could not save list.');
-    }
-  };
-
-  const handleMarkAsBought = async (group) => {
-    try {
-      const itemId = group.ids[0];
-      await api.post(`/list/item/${itemId}/buy`);
-      setRawItems(prev => prev.filter(i => i._id !== itemId));
-    } catch (err) {
-      console.error('❌ Failed to mark as bought:', err?.response?.data || err.message);
-    }
-  };
-
-  const renderSwipeActions = (group) => (
-    <TouchableOpacity
-      style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', width: 70 }}
-      onPress={async () => {
-        try {
-          for (let id of group.ids) {
-            if (onDelete) await onDelete(id);
-            else await api.delete(`/list/item/${id}`);
-          }
-          const { data } = await api.get(`/lists/${listId}`);
-          setRawItems(data.items);
-        } catch (err) {
-          console.error('Swipe delete error:', err);
-        }
-      }}
-    >
-      <Icon name="trash-outline" size={24} color="#fff" />
-    </TouchableOpacity>
+  // Empty state UI
+  const renderEmptyState = () => (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 60 }}>
+      <Ionicons name="cart-outline" size={80} color="#2E7D32" style={{ marginBottom: 20 }} />
+      <Text style={{ fontSize: 18, color: '#888', marginBottom: 20 }}>Your personal list is empty!</Text>
+      <TouchableOpacity
+        style={{
+          backgroundColor: '#B2F2D7', // light green
+          paddingVertical: 16,
+          paddingHorizontal: 32,
+          borderRadius: 8,
+          opacity: 0.6,
+        }}
+        disabled={true}
+      >
+        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>Compare Prices</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>
-          {listId ? `Editing: ${listName}` : '🧾 My Shopping List'}
-        </Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
+      <View style={{ padding: 20, paddingBottom: 0 }}>
+        <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#2E7D32', marginBottom: 16 }}>My List</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+          <TouchableOpacity
+            style={[styles.tabCard, activeTab === 'current' && styles.activeTab]}
+            onPress={() => setActiveTab('current')}
+          >
+            <Text style={styles.tabTitle}>CURRENT LIST</Text>
+            <Text style={styles.tabCount}>{items.length}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabCard, activeTab === 'lastBought' && styles.activeTab]}
+            onPress={() => setActiveTab('lastBought')}
+          >
+            <Text style={styles.tabTitle}>LAST BOUGHT</Text>
+            <Text style={styles.tabCount}>{lastBoughtItems.length}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-
-      <FlatList
-        data={groupedItems}
-        keyExtractor={(g) => g.ids[0]}
-        extraData={rawItems}
-        renderItem={({ item: g }) => (
-          <Swipeable renderRightActions={() => renderSwipeActions(g)}>
-            <View style={styles.itemRow}>
-              {g.icon && <Image source={{ uri: g.icon }} style={styles.icon} />}
-              <Text style={styles.itemText}>{g.name}</Text>
-              <View style={styles.quantityControls}>
-                <TouchableOpacity onPress={() => handleDecrement(g)} style={styles.qBtn}>
-                  <Text style={styles.qBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={styles.qCountText}>{g.quantity}</Text>
-                <TouchableOpacity onPress={() => handleIncrement(g)} style={styles.qBtn}>
-                  <Text style={styles.qBtnText}>+</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleMarkAsBought(g)} style={styles.buyBtn}>
-                  <Icon name="checkmark-done-outline" size={20} color="#fff" />
-                </TouchableOpacity>
+      <View style={{ flex: 1, paddingHorizontal: 12, paddingTop: 8 }}>
+        {activeTab === 'current' ? (
+          items.length === 0 ? (
+            renderEmptyState()
+          ) : (
+            <>
+              <FlatList
+                key={'grid-3'}
+                data={items}
+                renderItem={renderItem}
+                keyExtractor={(item, idx) => `${item._id || item.id || item.name}_${idx}`}
+                numColumns={3}
+                contentContainerStyle={{ paddingBottom: 60, paddingHorizontal: CARD_MARGIN }}
+              />
+              <View style={{ alignItems: 'center', marginTop: 24, marginBottom: 16 }}>
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity
+                    style={styles.selectItemsButton}
+                    onPress={() => navigation.navigate('Main')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.buttonText}>Select Items</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.compareButton}
+                    onPress={handleComparePrices}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.buttonText}>Compare</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
+            </>
+          )
+        ) : (
+          lastBoughtItems.length === 0 ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name="cart-outline" size={80} color="#2E7D32" style={{ marginBottom: 20 }} />
+              <Text style={{ fontSize: 18, color: '#888', marginBottom: 20 }}>No last trip yet</Text>
             </View>
-          </Swipeable>
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <LottieView
-              source={require('../assets/animations/grocery.json')}
-              autoPlay
-              loop
-              style={styles.lottie}
-            />
-            <Text style={styles.emptyText}>Your list is empty</Text>
-            <Text style={styles.emptySubtext}>Add something tasty 🥦🍞🥛</Text>
-          </View>
-        }
-      />
+          ) : (
+            <>
+              {/* Trip History Button */}
+              {tripHistory.length > 1 && (
+                <View style={{ marginBottom: 10 }}>
+                  <TouchableOpacity
+                    style={styles.tripHistoryButton}
+                    onPress={() => setShowTripHistory(!showTripHistory)}
+                  >
+                    <Ionicons name={showTripHistory ? "chevron-up" : "chevron-down"} size={20} color="#2E7D32" />
+                    <Text style={styles.tripHistoryButtonText}>
+                      {showTripHistory ? 'Hide Trip History' : `Show Trip History (${tripHistory.length} trips)`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
-      <View style={styles.footer}>
-        {!listId && (
-          <>
-            <Button title="Save List" onPress={() => setModalVisible(true)} />
-            <View style={{ height: 10 }} />
-          </>
+              {/* Trip History List */}
+              {showTripHistory && tripHistory.length > 0 && (
+                <View style={{ marginBottom: 10 }}>
+                  <FlatList
+                    data={tripHistory}
+                    renderItem={renderTripHistoryItem}
+                    keyExtractor={(item) => item.id}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 8 }}
+                  />
+                  {selectedTrip && (
+                    <TouchableOpacity
+                      style={styles.clearTripButton}
+                      onPress={clearSelectedTrip}
+                    >
+                      <Text style={styles.clearTripButtonText}>Show Most Recent Trip</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* Store Info */}
+              {lastStore && (
+                <View style={{ backgroundColor: '#E3F2FD', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                  <Text style={{ color: '#1976D2', fontWeight: 'bold' }}>
+                    Store: {lastStore.branch || lastStore.storeName}
+                  </Text>
+                  <Text style={{ color: '#1976D2' }}>
+                    Address: {lastStore.address}
+                  </Text>
+                  {lastStore.totalPrice && (
+                    <Text style={{ color: '#1976D2' }}>
+                      Total Price: ₪{lastStore.totalPrice}
+                    </Text>
+                  )}
+                  {selectedTrip && (
+                    <Text style={{ color: '#1976D2', fontStyle: 'italic' }}>
+                      Trip #{selectedTrip.tripNumber} - {new Date(selectedTrip.completedAt).toLocaleDateString()}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Items List */}
+              <FlatList
+                key={'last-bought'}
+                data={lastBoughtItems}
+                renderItem={renderItem2}
+                keyExtractor={(item, idx) => `${item._id || item.id || item.name}_${idx}`}
+                numColumns={3}
+                contentContainerStyle={{ paddingBottom: 60, paddingHorizontal: CARD_MARGIN }}
+              />
+            </>
+          )
         )}
       </View>
-
-      {listId && (
-        <View style={{ marginTop: 12 }}>
-          <Button
-  title="📍 Where To Buy"
-  onPress={() => {
-    if (!locationCity || rawItems.length === 0) {
-      console.warn('⚠️ Missing location or items in route params');
-      Alert.alert('Missing Data', 'Ensure your location and list items are loaded');
-      return;
-    }
-    console.log('🚀 Navigating with locationCity:', locationCity, 'Items:', rawItems.length);
-
-    navigation.navigate('WhereToBuy', {
-      listId,
-      listName,
-      items: rawItems,
-      locationCity   // ← 🔥 Pass it explicitly!
-    });
-  }}
-  color="#007AFF"
-/>
-
-        </View>
-      )}
-
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>List Name</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter name"
-              value={listName}
-              onChangeText={setListName}
-            />
-            <View style={styles.modalBtns}>
-              <Button title="Cancel" onPress={() => setModalVisible(false)} />
-              <Button title="Save" onPress={handleSaveList} />
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#fff' },
-  headerRow: {
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    alignItems: 'center',
+    margin: CARD_MARGIN / 2,
+    padding: 16,
+    flex: 1,
+    minWidth: 0,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    position: 'relative',
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 2,
+    backgroundColor: '#F9EAEA',
+    borderRadius: 16,
+    padding: 4,
+  },
+  image: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginBottom: 10,
+    marginTop: 8,
+  },
+  productName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 8,
+    color: '#333',
+  },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  qtyButton: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#E8F5E9',
+    marginHorizontal: 4,
+  },
+  qtyText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    minWidth: 28,
+    textAlign: 'center',
+  },
+  tabCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    elevation: 2,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  activeTab: {
+    borderColor: '#2E7D32',
+    backgroundColor: '#E8F5E9',
+  },
+  tabTitle: {
+    fontWeight: 'bold',
+    fontSize: 15,
+    color: '#2E7D32',
+    marginBottom: 4,
+  },
+  tabCount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1976D2',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 10,
+  },
+  selectItemsButton: {
+    backgroundColor: '#2E7D32',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+  },
+  compareButton: {
+    backgroundColor: '#1976D2',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  tripCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 12,
+    marginRight: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    minWidth: 150,
+  },
+  selectedTripCard: {
+    borderColor: '#2E7D32',
+    borderWidth: 2,
+  },
+  tripHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
+  },
+  tripTitle: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#333',
+  },
+  tripDate: {
+    fontSize: 12,
+    color: '#666',
+  },
+  tripStore: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 4,
+  },
+  tripPrice: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#1976D2',
+  },
+  tripHistoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F2F7',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
     marginBottom: 10,
   },
-  title: { fontSize: 24, fontWeight: 'bold' },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 6,
-    borderRadius: 6,
-  },
-  icon: { width: 40, height: 40, marginRight: 12, borderRadius: 4 },
-  itemText: { fontSize: 18, flex: 1 },
-  quantityControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 10,
-  },
-  qBtn: {
-    backgroundColor: '#eee',
-    borderRadius: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-  },
-  qBtnText: {
-    fontSize: 18,
+  tripHistoryButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#2E7D32',
     fontWeight: 'bold',
   },
-  qCountText: {
+  clearTripButton: {
+    backgroundColor: '#FFE0E0',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    alignSelf: 'center',
+    marginTop: 10,
+  },
+  clearTripButtonText: {
+    color: '#D32F2F',
     fontSize: 16,
     fontWeight: 'bold',
-    marginHorizontal: 8,
-  },
-  empty: { textAlign: 'center', marginTop: 20, color: '#888' },
-  footer: { marginTop: 20 },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    width: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 20,
-  },
-  modalTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
-    marginBottom: 20,
-  },
-  modalBtns: { flexDirection: 'row', justifyContent: 'space-around' },
-  emptyContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 50,
-  },
-  lottie: {
-    width: 200,
-    height: 200,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#555',
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 4,
-  },
-  buyBtn: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginLeft: 6,
   },
 });

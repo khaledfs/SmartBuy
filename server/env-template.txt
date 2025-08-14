@@ -1,0 +1,19 @@
+# Copy this file to .env and update with your values
+
+# MongoDB Connection String
+# Replace with your client's MongoDB connection string
+MONGO_URI=mongodb+srv://your_client_username:your_client_password@your_client_cluster.mongodb.net/smartbuy?retryWrites=true&w=majority
+
+# JWT Secret (change this to a secure random string)
+JWT_SECRET=your-super-secret-jwt-key-for-smart-buy-app-2024
+
+# Google Maps API Key (if needed)
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+
+
+
+
+
+
+
+

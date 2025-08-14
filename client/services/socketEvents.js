@@ -2,7 +2,15 @@
 import socket from './socket';
 
 socket.on('connect', () => {
-  console.log('✅ socket connected:', socket.id);
+  console.log('✅ Socket connected:', socket.id);
+});
+
+socket.on('joinedGroup', (data) => {
+  console.log('👥 Joined group room:', data);
+});
+
+socket.on('listUpdate', (data) => {
+  console.log('📢 Received listUpdate:', data);
 });
 
 /**
@@ -21,8 +29,41 @@ export function registerGroupUpdates(callback) {
  * @returns {Function} unsubscribe function
  */
 export function registerListUpdates(callback) {
-  socket.on('listUpdate', callback);
+  socket.on('listUpdate', (data) => {
+    console.log('📢 List update received in registerListUpdates:', data);
+    callback(data);
+  });
   return () => socket.off('listUpdate', callback);
+}
+
+/**
+ * Listen for suggestion updates (favorites, purchases, etc.)
+ * @param {Function} callback - function to run when suggestionUpdate is received
+ * @returns {Function} unsubscribe function
+ */
+export function registerSuggestionUpdates(callback) {
+  socket.on('suggestionUpdate', (data) => {
+    console.log('📊 Suggestion update received:', data);
+    callback(data);
+  });
+  return () => socket.off('suggestionUpdate', callback);
+}
+
+export function registerGroupNotifications(callback) {
+  socket.on('groupCreated', (data) => {
+    console.log('👥 Group created notification received:', data);
+    callback(data);
+  });
+  
+  socket.on('memberAdded', (data) => {
+    console.log('👥 Member added notification received:', data);
+    callback(data);
+  });
+  
+  return () => {
+    socket.off('groupCreated', callback);
+    socket.off('memberAdded', callback);
+  };
 }
 
 /**
