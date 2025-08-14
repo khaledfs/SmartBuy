@@ -37,8 +37,6 @@ app.use(express.json({ limit: '1mb' }));
 // API routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
-app.use('/api/supermarkets', require('./routes/supermarketRoutes'));
-app.use('/api/offers', require('./routes/offerRoutes'));
 app.use('/api/list', require('./routes/listRoutes'));
 app.use('/api/lists', require('./routes/listRoutes'));
 app.use('/api/suggestions', require('./routes/suggestionRoutes'));
