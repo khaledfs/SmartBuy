@@ -107,7 +107,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
     setStores([]);
     try {
       // Replace with your actual backend endpoint
-      const response = await fetch('http://172.20.10.6:5000/api/compare/price', {
+      const response = await fetch('http://172.20.10.14:5000/api/compare/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

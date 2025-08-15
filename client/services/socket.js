@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 
 // Use environment variable or fallback to the current IP
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://172.20.10.6:5000';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://172.20.10.14:5000';
 
 const socket = io(SOCKET_URL, {
   timeout: 5000,

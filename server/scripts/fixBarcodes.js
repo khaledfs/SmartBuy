@@ -4,7 +4,7 @@ require('dotenv').config();
 
 async function connectToDatabase() {
   try {
-    const MONGO_URI = process.env.MONGO_URI;
+    const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://ibrahimkhalif22031:Allah22031@ibrahim.cfpeif6.mongodb.net/smartbuy?retryWrites=true&w=majority';
     await mongoose.connect(MONGO_URI);
     console.log('✅ Connected to MongoDB');
   } catch (error) {

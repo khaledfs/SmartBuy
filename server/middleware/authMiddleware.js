@@ -11,7 +11,8 @@ module.exports = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.id;          // ✦ now available to every controller
+    req.userId = decoded.id;          // For backward compatibility with existing controllers
+    req.user = { id: decoded.id };    // For suggestion controller and future controllers
     next();
   } catch (err) {
     return res.status(401).json({ message: 'Invalid or expired token' });

@@ -37,36 +37,6 @@ export function registerListUpdates(callback) {
 }
 
 /**
- * Listen for suggestion updates (favorites, purchases, etc.)
- * @param {Function} callback - function to run when suggestionUpdate is received
- * @returns {Function} unsubscribe function
- */
-export function registerSuggestionUpdates(callback) {
-  socket.on('suggestionUpdate', (data) => {
-    console.log('📊 Suggestion update received:', data);
-    callback(data);
-  });
-  return () => socket.off('suggestionUpdate', callback);
-}
-
-export function registerGroupNotifications(callback) {
-  socket.on('groupCreated', (data) => {
-    console.log('👥 Group created notification received:', data);
-    callback(data);
-  });
-  
-  socket.on('memberAdded', (data) => {
-    console.log('👥 Member added notification received:', data);
-    callback(data);
-  });
-  
-  return () => {
-    socket.off('groupCreated', callback);
-    socket.off('memberAdded', callback);
-  };
-}
-
-/**
  * Emit that the user is joining a socket room (group or list)
  * @param {string} roomId - groupId or listId
  */

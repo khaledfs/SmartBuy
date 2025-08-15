@@ -11,7 +11,7 @@ const UserFavorites = require('../models/UserFavorites');
 const ProductFrequency = require('../models/ProductFrequency');
 
 // MongoDB connection string
-const MONGODB_URI = 'mongodb+srv://Khalid211:khalidkind211@cluster0.r7gzuda.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = 'mongodb+srv://ibrahimkhalif22031:Allah22031@ibrahim.cfpeif6.mongodb.net/smartbuy?retryWrites=true&w=majority';
 
 // Load products from products.json
 function loadProducts() {

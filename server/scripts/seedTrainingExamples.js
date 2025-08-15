@@ -9,7 +9,7 @@ const PurchaseHistory = require('../models/PurchaseHistory');
 const TrainingExample = require('../models/TrainingExample');
 
 // MongoDB connection string (same as your other scripts)
-const MONGODB_URI = 'mongodb+srv://Khalid211:khalidkind211@cluster0.r7gzuda.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = 'mongodb+srv://ibrahimkhalif22031:Allah22031@ibrahim.cfpeif6.mongodb.net/smartbuy?retryWrites=true&w=majority';
 
 // Helper to generate features for a product/user
 function extractFeatures({ isFavorite, purchasedBefore, timesPurchased, recentlyPurchased, storeCount, timesWasRejectedByUser, timesWasRejectedByCart }) {
