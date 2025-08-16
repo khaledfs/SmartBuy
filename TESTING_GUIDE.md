@@ -9,7 +9,7 @@ This guide will help you test your app after running the government data barcode
 First, run the automated tests to check for any issues:
 
 ```bash
-cd server/scripts
+cd Jimale-up/server/scripts
 node testBarcodeIntegrity.js
 ```
 
@@ -128,7 +128,7 @@ Test the same product with different barcode formats:
 
 ### Check Database Directly
 ```bash
-cd server/scripts
+cd Jimale-up/server/scripts
 node -e "
 const mongoose = require('mongoose');
 require('dotenv').config();

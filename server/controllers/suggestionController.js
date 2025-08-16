@@ -254,20 +254,19 @@ exports.getSmartSuggestions = async (req, res) => {
             type: 'favorite'
           }));
         } else {
-                // Get favorites for the current user only - SIMPLE APPROACH
-        const userFavorites = await UserFavorites.find({ 
-          groupId: group._id, 
-          userId: req.user.id 
-        }).limit(limitNum);
+          // Get favorites for ALL group members - GROUP-BASED APPROACH
+          const groupFavorites = await UserFavorites.find({ 
+            groupId: group._id 
+          }).limit(limitNum);
+          
+          console.log('💖 Found', groupFavorites.length, 'group favorites');
         
-        console.log('💖 Found', userFavorites.length, 'user favorites');
-        
-        if (userFavorites.length === 0) {
+        if (groupFavorites.length === 0) {
           suggestions = [];
         } else {
           // Get product IDs from favorites
-          const productIds = userFavorites.map(fav => fav.productId);
-          console.log('💖 Product IDs from favorites:', productIds);
+          const productIds = groupFavorites.map(fav => fav.productId);
+          console.log('💖 Product IDs from group favorites:', productIds);
           
           // Fetch products directly
           const products = await Product.find({ _id: { $in: productIds } });
@@ -865,6 +864,24 @@ exports.markAsPurchased = async (req, res) => {
       } catch (freqError) {
         console.error('Error updating household frequency tracking for purchase:', freqError);
       }
+      
+      // Emit socket event to notify all group members about the new purchase
+      const io = req.app.get('io');
+      if (io) {
+        const purchaseEvent = {
+          groupId: groupId,
+          productId: productId.toString(),
+          userId: userId,
+          action: 'productPurchased',
+          quantity: quantity,
+          price: price,
+          store: store,
+          timestamp: Date.now()
+        };
+        
+        io.to(groupId).emit('suggestionUpdate', purchaseEvent);
+        console.log(`📢 Emitted suggestionUpdate (productPurchased) to group ${groupId}:`, purchaseEvent);
+      }
     }
 
     res.json({
@@ -987,6 +1004,21 @@ exports.addToFavorites = async (req, res) => {
       // Clear cache to ensure fresh data is fetched
       clearSuggestionsCache(userId, groupId);
       
+      // Emit socket event to notify all group members about the new favorite
+      const io = req.app.get('io');
+      if (io) {
+        const favoriteEvent = {
+          groupId: groupId,
+          productId: productId.toString(),
+          userId: userId,
+          action: 'favoriteAdded',
+          timestamp: Date.now()
+        };
+        
+        io.to(groupId).emit('suggestionUpdate', favoriteEvent);
+        console.log(`📢 Emitted suggestionUpdate (favoriteAdded) to group ${groupId}:`, favoriteEvent);
+      }
+      
       res.json({
         success: true,
         message: 'Product added to favorites',
@@ -1071,6 +1103,21 @@ exports.removeFromFavorites = async (req, res) => {
     // Clear cache to ensure fresh data is fetched
     clearSuggestionsCache(userId, groupId);
     
+    // Emit socket event to notify all group members about the removed favorite
+    const io = req.app.get('io');
+    if (io) {
+      const favoriteEvent = {
+        groupId: groupId,
+        productId: productId.toString(),
+        userId: userId,
+        action: 'favoriteRemoved',
+        timestamp: Date.now()
+      };
+      
+      io.to(groupId).emit('suggestionUpdate', favoriteEvent);
+      console.log(`📢 Emitted suggestionUpdate (favoriteRemoved) to group ${groupId}:`, favoriteEvent);
+    }
+    
     res.json({
       success: true,
       message: 'Product removed from favorites'
@@ -1120,15 +1167,14 @@ exports.checkFavoriteStatus = async (req, res) => {
       });
     }
 
-    console.log('✅ Checking favorite status with:', { userId, groupId, productId });
+    console.log('✅ Checking group favorite status with:', { groupId, productId });
 
     const favorite = await UserFavorites.findOne({
-      userId,
       groupId,
-      productId: productId.toString() // Ensure it's a string
+      productId: productId.toString() // Check if ANY group member favorited this
     });
 
-    console.log('✅ Favorite check result:', !!favorite);
+    console.log('✅ Group favorite check result:', !!favorite);
 
     res.json({
       success: true,

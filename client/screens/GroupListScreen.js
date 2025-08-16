@@ -4,6 +4,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import { useFocusEffect } from '@react-navigation/native';
+import { registerGroupNotifications } from '../services/socketEvents';
+import Toast from 'react-native-toast-message';
 
 const demoGroups = [
   {
@@ -44,6 +46,53 @@ export default function GroupListScreen({ navigation }) {
       fetchGroups();
     }, [])
   );
+
+  // Handle real-time group notifications
+  useEffect(() => {
+    const unsubscribe = registerGroupNotifications((data) => {
+      if (data.groupCreated) {
+        // Show toast notification
+        Toast.show({
+          type: 'success',
+          text1: 'New Group Created!',
+          text2: `You've been added to a new group`,
+          position: 'top',
+          visibilityTime: 4000,
+        });
+        
+        // Refresh groups list
+        fetchGroups();
+      } else if (data.memberAdded) {
+        Toast.show({
+          type: 'info',
+          text1: 'New Member Added!',
+          text2: 'A new member joined your group',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+        
+        // Refresh groups list
+        fetchGroups();
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sort groups: new groups first, then by activity
+  const sortedGroups = groups.sort((a, b) => {
+    // New groups (created in last 24 hours) go first
+    const aIsNew = new Date(a.createdAt || 0) > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const bIsNew = new Date(b.createdAt || 0) > new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    if (aIsNew && !bIsNew) return -1;
+    if (!aIsNew && bIsNew) return 1;
+    
+    // Then sort by last activity (most recent first)
+    const aActivity = new Date(a.updatedAt || a.createdAt || 0);
+    const bActivity = new Date(b.updatedAt || b.createdAt || 0);
+    return bActivity - aActivity;
+  });
 
   const handleAddMember = () => {
     if (memberInput.trim() && !members.includes(memberInput.trim())) {
@@ -135,29 +184,42 @@ export default function GroupListScreen({ navigation }) {
           </View>
         ) : (
           <>
-            {groups.map((group, idx) => (
-              <TouchableOpacity
-                key={group.id || group._id}
-                style={styles.groupCard}
-                activeOpacity={0.85}
-                onPress={() => navigation.navigate('GroupDetail', { groupId: group.id || group._id })}
-              >
-                <View style={styles.groupCardHeader}>
-                  <Icon name="people" size={28} color="#2E7D32" style={{ marginRight: 10 }} />
-                  <Text style={styles.groupName}>{group.name}</Text>
-                </View>
-                <View style={styles.groupCardInfoRow}>
-                  <View style={styles.groupCardInfoItem}>
-                    <Icon name="person-outline" size={18} color="#4ECDC4" />
-                    <Text style={styles.memberCount}>{group.members.length} member{group.members.length !== 1 ? 's' : ''}</Text>
+            {sortedGroups.map((group, idx) => {
+              const isNewGroup = new Date(group.createdAt || 0) > new Date(Date.now() - 24 * 60 * 60 * 1000);
+              
+              return (
+                <TouchableOpacity
+                  key={group.id || group._id}
+                  style={[styles.groupCard, isNewGroup && styles.newGroupCard]}
+                  activeOpacity={0.85}
+                  onPress={() => navigation.navigate('GroupDetail', { groupId: group.id || group._id })}
+                >
+                  <View style={styles.groupCardHeader}>
+                    <Icon name="people" size={28} color="#2E7D32" style={{ marginRight: 10 }} />
+                    <View style={styles.groupNameContainer}>
+                      <Text style={styles.groupName}>{group.name}</Text>
+                      {isNewGroup && (
+                        <View style={styles.newGroupBadge}>
+                          <Text style={styles.newGroupBadgeText}>NEW</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <View style={styles.groupCardInfoItem}>
-                    <Icon name="time-outline" size={18} color="#FF6B6B" />
-                    <Text style={styles.lastActivity}>Last edited {group.lastActivity || 'recently'}</Text>
+                  <View style={styles.groupCardInfoRow}>
+                    <View style={styles.groupCardInfoItem}>
+                      <Icon name="person-outline" size={18} color="#4ECDC4" />
+                      <Text style={styles.memberCount}>{group.members.length} member{group.members.length !== 1 ? 's' : ''}</Text>
+                    </View>
+                    <View style={styles.groupCardInfoItem}>
+                      <Icon name="time-outline" size={18} color="#FF6B6B" />
+                      <Text style={styles.lastActivity}>
+                        {isNewGroup ? 'Just created' : `Last edited ${group.lastActivity || 'recently'}`}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity style={styles.createButton} onPress={() => setShowCreateModal(true)}>
               <Icon name="add" size={20} color="#fff" />
               <Text style={styles.createButtonText}>Create Group</Text>
@@ -337,6 +399,28 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+  },
+  groupNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  newGroupCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+  newGroupBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  newGroupBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   memberCount: {
     fontSize: 14,

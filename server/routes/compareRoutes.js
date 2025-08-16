@@ -220,16 +220,17 @@ async function fetchCompare(locationCity, searchTerm) {
           let priceText = '';
           let quantityText = '';
           
-          // Check if column 4 has price (old structure)
+          // Get text from columns 4 and 5
           const col4Text = cells.eq(3).text().trim();
           const col5Text = cells.eq(4).text().trim();
           
+          // Priority: Column 4 (discounted price) if available, otherwise Column 5 (original price)
           if (/^\d+\.?\d*$/.test(col4Text)) {
-            // Column 4 has price (old structure)
+            // Column 4 has a valid price (discounted price)
             priceText = col4Text;
             quantityText = col5Text;
           } else if (/^\d+\.?\d*$/.test(col5Text)) {
-            // Column 5 has price (new structure)
+            // Column 4 is empty/invalid, use Column 5 (original price)
             priceText = col5Text;
             quantityText = col4Text;
           }

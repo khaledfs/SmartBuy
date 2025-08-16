@@ -75,7 +75,7 @@ client/services/api.js
 
 Change this line:
 ```javascript
-baseURL: 'http://192.168.0.103:5000/api'
+baseURL: 'http://192.168.201.100:5000/api'
 ```
 
 To match your server's IP address.

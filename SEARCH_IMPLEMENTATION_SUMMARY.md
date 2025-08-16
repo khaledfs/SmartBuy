@@ -156,3 +156,6 @@ The search functionality now works exactly as requested:
 
 Users can now find any product in the database by typing in the search bar, regardless of whether it was loaded in the initial product list! 🎉
 
+
+
+

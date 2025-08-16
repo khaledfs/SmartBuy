@@ -4,6 +4,7 @@ const mongoose   = require('mongoose');
 const cors       = require('cors');
 const http       = require('http');
 const { Server } = require('socket.io');
+const jwt        = require('jsonwebtoken');
 
 require('dotenv').config();
 
@@ -107,9 +108,32 @@ const initializeMLModel = async () => {
   }
 };
 
+// Socket.IO authentication middleware
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+      return next(new Error('Authentication token required'));
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id;
+    socket.username = decoded.username;
+    
+    // Join user's personal room for direct notifications
+    socket.join(decoded.id.toString());
+    
+    console.log(`🔐 Socket authenticated for user: ${decoded.username} (${decoded.id})`);
+    next();
+  } catch (error) {
+    console.log('❌ Socket authentication failed:', error.message);
+    next(new Error('Authentication failed'));
+  }
+});
+
 // Socket.IO event handlers
 io.on('connection', (socket) => {
-  console.log('🔌 Socket connected:', socket.id);
+  console.log(`🔌 Socket connected for user ${socket.username}:`, socket.id);
 
   // Handle group joining with verification
   socket.on('joinGroup', async (groupId) => {
@@ -118,12 +142,12 @@ io.on('connection', (socket) => {
       
       // Store groupId in socket for later use
       socket.groupId = groupId;
-      socket.join(groupId);
+    socket.join(groupId);
       
-      console.log(`👥 Socket ${socket.id} joined group: ${groupId}`);
+    console.log(`👥 Socket ${socket.id} joined group: ${groupId}`);
       
-      // Send confirmation to client
-      socket.emit('joinedGroup', { groupId, socketId: socket.id });
+    // Send confirmation to client
+    socket.emit('joinedGroup', { groupId, socketId: socket.id });
       
       // Also join the group's list room if available
       try {
@@ -178,6 +202,52 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle member added to group (from client socket)
+  socket.on('memberAdded', (data) => {
+    const { groupId, newMember, addedBy } = data;
+    console.log(`👥 Broadcasting memberAdded to group ${groupId}`);
+    
+    if (groupId) {
+      io.to(groupId).emit('memberAdded', {
+        groupId,
+        newMember,
+        addedBy,
+        timestamp: Date.now()
+      });
+      console.log(`📢 Emitted memberAdded to group room: ${groupId}`);
+    }
+  });
+
+  // Handle suggestion updates (favorites, purchases, etc.)
+  socket.on('suggestionUpdate', (data) => {
+    const { groupId, productId, userId, action, ...additionalData } = data;
+    console.log(`📊 Broadcasting suggestionUpdate to group ${groupId}`);
+    
+    if (groupId) {
+      io.to(groupId).emit('suggestionUpdate', {
+        groupId,
+        productId,
+        userId,
+        action,
+        ...additionalData,
+        timestamp: Date.now()
+      });
+      console.log(`📢 Emitted suggestionUpdate to group room: ${groupId} - Action: ${action}`);
+    }
+  });
+
+  // Handle group creation notifications
+  socket.on('groupCreated', (data) => {
+    const { groupId, groupName, createdBy, members } = data;
+    console.log(`👥 Broadcasting groupCreated to members: ${members}`);
+    members.forEach(memberId => {
+      if (memberId !== createdBy) {
+        io.to(memberId).emit('groupCreated', { groupId, groupName, createdBy, timestamp: Date.now() });
+        console.log(`📢 Emitted groupCreated to member: ${memberId}`);
+      }
+    });
+  });
+
   socket.on('disconnect', () => {
     console.log('🔌 Socket disconnected:', socket.id);
   });
@@ -195,7 +265,7 @@ server.listen(PORT, () => {
   // Get custom branding from environment variables or use defaults
   const APP_NAME = process.env.APP_NAME || 'SmartBuy';
   const DEVELOPER_NAME = process.env.DEVELOPER_NAME || 'Your Name';
-  const NETWORK_IP = process.env.NETWORK_IP || '172.20.10.6';
+  const NETWORK_IP = process.env.NETWORK_IP || '192.168.201.100';
   
   console.log(`🚀 ${APP_NAME} Server Started`);
   console.log(`👨‍💻 Developer: ${DEVELOPER_NAME}`);

@@ -22,41 +22,7 @@ router.get('/', async (req, res) => {
     // Build MongoDB query
     let mongoQuery = {};
     if (q) {
-      // Enhanced search: use MongoDB text search for better performance and relevance
-      // First try text search, then fallback to regex if needed
-      try {
-        // Use MongoDB text search with scoring
-        const textSearchResults = await Product.find(
-          { $text: { $search: q } },
-          { score: { $meta: "textScore" } }
-        )
-        .sort({ score: { $meta: "textScore" } })
-        .limit(500)
-        .lean();
-        
-        if (textSearchResults.length > 0) {
-          products = textSearchResults;
-          console.log(`🔍 Text search found ${products.length} results for "${q}"`);
-        } else {
-          // Fallback to regex search if text search returns no results
-          mongoQuery.$or = [
-            { name: { $regex: q, $options: 'i' } },
-            { category: { $regex: q, $options: 'i' } },
-            { barcode: { $regex: q, $options: 'i' } },
-            { brand: { $regex: q, $options: 'i' } }
-          ];
-          console.log(`🔍 Text search returned no results, using regex search for "${q}"`);
-        }
-      } catch (textSearchError) {
-        console.log(`🔍 Text search failed, using regex search for "${q}":`, textSearchError.message);
-        // Fallback to regex search
-        mongoQuery.$or = [
-          { name: { $regex: q, $options: 'i' } },
-          { category: { $regex: q, $options: 'i' } },
-          { barcode: { $regex: q, $options: 'i' } },
-          { brand: { $regex: q, $options: 'i' } }
-        ];
-      }
+      mongoQuery.name = { $regex: q, $options: 'i' };
     }
     if (category) {
       mongoQuery.category = category;
@@ -101,14 +67,10 @@ router.get('/', async (req, res) => {
       }
     } else {
       // If filters/search, use find with proper pagination
-      // For search queries, we want to get more results to ensure comprehensive search
-      if (products.length === 0) { // Only if we don't already have products from text search
-        const searchLimit = q ? Math.max(maxProducts, 500) : maxProducts;
-        products = await Product.find(mongoQuery)
-          .skip(skip)
-          .limit(searchLimit)
-          .lean();
-      }
+      products = await Product.find(mongoQuery)
+        .skip(skip)
+        .limit(maxProducts)
+        .lean();
     }
 
     // Ensure valid images using the same logic as Smart Suggestions
@@ -119,24 +81,13 @@ router.get('/', async (req, res) => {
         img: suggestionController.getValidImage(p.img)
       }));
 
-    // Enhanced logging for search queries
-    if (q) {
-      console.log(`🔍 SEARCH QUERY: "${q}" - Found ${products.length} products in database`);
-      console.log(`🔍 Search results sample:`, products.slice(0, 5).map(p => ({ 
-        name: p.name, 
-        category: p.category,
-        barcode: p.barcode,
-        hasImage: !!p.img
-      })));
-    } else {
-      console.log(`📦 Products API: ${products.length} products returned from MongoDB (${req.query.limit || 20} limit, ${req.query.offset || 0} offset)`);
-      console.log(`🔍 Sample products:`, products.slice(0, 3).map(p => ({ 
-        name: p.name, 
-        hasImage: !!p.img, 
-        imageType: p.img ? p.img.substring(0, 30) : 'none',
-        isPlaceholder: p.img === 'https://via.placeholder.com/100'
-      })));
-    }
+    console.log(`📦 Products API: ${products.length} products returned from MongoDB (${req.query.limit || 20} limit, ${req.query.offset || 0} offset)`);
+    console.log(`🔍 Sample products:`, products.slice(0, 3).map(p => ({ 
+      name: p.name, 
+      hasImage: !!p.img, 
+      imageType: p.img ? p.img.substring(0, 30) : 'none',
+      isPlaceholder: p.img === 'https://via.placeholder.com/100'
+    })));
     res.json(products);
   } catch (err) {
     console.error('❌ Products API Error:', err.message);

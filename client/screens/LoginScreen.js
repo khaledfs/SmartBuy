@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import jwtDecode from 'jwt-decode';
+import { initializeSocketAfterLogin } from '../services/socket';
 
 const { width, height } = Dimensions.get('window');
 
@@ -53,6 +54,10 @@ export default function LoginScreen({ navigation }) {
       const { token } = response.data;
       await AsyncStorage.setItem('token', token);
       await AsyncStorage.removeItem('justSignedUp');
+      
+      // Initialize socket after successful login
+      await initializeSocketAfterLogin();
+      
       navigation.reset({
         index: 0,
         routes: [{ name: 'beforeMain' }], // Go to transition screen
@@ -77,6 +82,9 @@ export default function LoginScreen({ navigation }) {
           
           // If we get here, token is valid
           if (response.status === 200) {
+            // Initialize socket for existing valid token
+            await initializeSocketAfterLogin();
+            
             navigation.reset({
               index: 0,
               routes: [{ name: 'beforeMain' }],

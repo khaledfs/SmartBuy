@@ -22,7 +22,8 @@ import api from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { joinRoom, registerGroupUpdates } from '../services/socketEvents';
+import { joinRoom, registerGroupUpdates, registerGroupNotifications } from '../services/socketEvents';
+import { disconnectSocket } from '../services/socket';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiEventEmitter } from '../services/api';
 import jwt_decode from 'jwt-decode';
@@ -53,6 +54,7 @@ export default function MainScreen({ navigation }) {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareCity, setCompareCity] = useState('');
   const [tripTypeModalVisible, setTripTypeModalVisible] = useState(false);
+  const [newGroupNotification, setNewGroupNotification] = useState(false);
 
   const { personalList, setPersonalList, lastBought, lastStore } = useContext(PersonalListProvider._context || require('../services/PersonalListContext').default);
 
@@ -84,6 +86,8 @@ export default function MainScreen({ navigation }) {
   }, []);
 
   const logout = async () => {
+    // Disconnect socket before logout
+    disconnectSocket();
     await AsyncStorage.removeItem('token');
     navigation.replace('Login');
   };
@@ -98,6 +102,16 @@ export default function MainScreen({ navigation }) {
       if (!token) navigation.replace('Login');
       else fetchGroups();
     };
+    
+    // Handle group notifications
+    const unsubscribe = registerGroupNotifications((data) => {
+      if (data.groupCreated) {
+        setNewGroupNotification(true);
+      }
+    });
+
+    checkSession();
+    return () => unsubscribe();
     checkSession();
   }, []);
 
@@ -530,9 +544,19 @@ export default function MainScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.navButton}
-          onPress={() => navigation.navigate('GroupList')}
+          onPress={() => {
+            navigation.navigate('GroupList');
+            setNewGroupNotification(false); // Clear notification when visiting
+          }}
         >
-          <Ionicons name="people" size={24} color="#2E7D32" />
+          <View style={styles.navButtonContainer}>
+            <Ionicons name="people" size={24} color="#2E7D32" />
+            {newGroupNotification && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationText}>!</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.navButtonText}>Groups</Text>
         </TouchableOpacity>
 
@@ -789,6 +813,27 @@ const styles = StyleSheet.create({
   navButton: {
     alignItems: 'center',
     flex: 1,
+  },
+  navButtonContainer: {
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -8,
+    backgroundColor: '#FF4444',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  notificationText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   navButtonText: {
     fontSize: 12,

@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initializeSocketAfterLogin } from '../services/socket';
 
 const { width, height } = Dimensions.get('window');
 
@@ -108,6 +109,10 @@ export default function SignupScreen({ navigation }) {
       const { token } = response.data;
       await AsyncStorage.setItem('token', token);
       await AsyncStorage.setItem('justSignedUp', 'true');
+      
+      // Initialize socket after successful signup
+      await initializeSocketAfterLogin();
+      
       navigation.reset({
         index: 0,
         routes: [{ name: 'beforeMain' }], // Go to transition screen

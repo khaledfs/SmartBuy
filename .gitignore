@@ -4,6 +4,3 @@ client/node_modules/
 server/node_modules/
 *.log
 .env
-.venv
-venv
-server/scripts/combined_products_with_images.json

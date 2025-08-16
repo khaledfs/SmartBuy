@@ -4,10 +4,8 @@ const router  = express.Router();
 const auth    = require('../middleware/authMiddleware');
 const ctl     = require('../controllers/listController');
 
-// Get all user’s lists (owned + group)
+// Get all user's lists (owned + group)
 router.get('/',       auth, ctl.getLists);
-
-router.patch('/item/:itemId/quantity', auth, ctl.updateQuantity);
 
 // Get single list (if user has access)
 router.get('/:id',    auth, ctl.getListById);
@@ -16,20 +14,21 @@ router.get('/:id',    auth, ctl.getListById);
 router.post('/',      auth, ctl.createList);
 
 // Update list (name or items)
-router.patch('/:id', auth, ctl.updateList); 
+router.put('/:id', auth, ctl.updateList); 
 
 // Delete list
 router.delete('/:id', auth, ctl.deleteList);
 
-//Delte item
-router.delete('/item/:itemId', auth, ctl.deleteItemById); 
-
-router.post('/item/:id/buy', auth, ctl.markItemAsBought);
-
-
 // Add item to a list
-router.post('/:id/items', auth, ctl.addItemToListById);
+router.post('/:id/items', auth, ctl.addItemToList);
 
+// Add item to a list by product ID
+router.post('/:id/items/:productId', auth, ctl.addItemToListById);
 
+// Delete item from list
+router.delete('/:id/items/:itemId', auth, ctl.deleteItemById); 
+
+// Mark item as bought
+router.put('/:id/items/:itemId/buy', auth, ctl.markItemAsBought);
 
 module.exports = router;

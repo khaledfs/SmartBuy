@@ -71,7 +71,7 @@ router.post('/:groupId/list/items', auth, async (req, res) => {
     
     console.log('Group and list found:', group.list._id);
     req.params.id = group.list._id;
-    return listController.addItemToListById(req, res);
+    return listController.addItemToList(req, res);
   } catch (err) {
     console.error('Failed to add item to group shared list:', err);
     res.status(500).json({ message: 'Server error', error: err.stack });

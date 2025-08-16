@@ -24,6 +24,7 @@ import GroupSharedListScreen from './screens/GroupSharedListScreen';
 import TransitionScreenPersonal from './screens/TransitionScreenPersonal';
 import StoreDetailScreen from './screens/StoreDetailScreen';
 import TransitionScreenGroup from './screens/TransitionScreenGroup';
+import Toast from 'react-native-toast-message';
 
 
 const Stack = createStackNavigator();
@@ -77,6 +78,7 @@ export default function App() {
             }} />
           </Stack.Navigator>
         </NavigationContainer>
+        <Toast />
       </SafeAreaProvider>
     </PersonalListProvider>
   );
