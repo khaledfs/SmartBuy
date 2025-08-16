@@ -4,7 +4,7 @@ const Product = require('../models/Product');
 // Connect to MongoDB
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/jimale-up');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ MongoDB connected for index rebuild');
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
