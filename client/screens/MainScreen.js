@@ -150,7 +150,6 @@ export default function MainScreen({ navigation }) {
     const unsubscribe = registerGroupUpdates(fetchGroups);
     return unsubscribe;
   }, []);
-
   // Fetch user name for welcome message
   useEffect(() => {
     const getUserName = async () => {
@@ -439,7 +438,7 @@ export default function MainScreen({ navigation }) {
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.welcomeSection}>
-          <Text style={[styles.welcomeText, { fontFamily: 'PlayfairDisplay_700Bold', fontSize: 38, color: '#4B2E83', letterSpacing: 1 }]}>Welcome</Text>
+          <Text style={[styles.welcomeText, { fontFamily: 'PlayfairDisplay_700Bold', fontSize: 38, color: '#000000ff', letterSpacing: 1 }]}>Welcome</Text>
           {locationName && (
             <View style={styles.locationContainer}>
               <Ionicons name="location" size={16} color="#666" />
@@ -545,7 +544,7 @@ export default function MainScreen({ navigation }) {
         <TouchableOpacity
           style={styles.navButton}
           onPress={() => {
-            navigation.navigate('GroupList');
+            navigation.replace('GroupList');
             setNewGroupNotification(false); // Clear notification when visiting
           }}
         >

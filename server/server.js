@@ -48,6 +48,8 @@ app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/favorites', require('./routes/favoriteRoutes'));
 app.use('/api/rejections', require('./routes/rejectionRoutes'));
 
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
 // Mock endpoint for groups (temporary for testing)
 app.get('/api/groups/my', (req, res) => {
   res.json([

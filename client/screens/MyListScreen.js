@@ -201,7 +201,7 @@ export default function MyListScreen({ navigation }) {
                 <View style={styles.buttonContainer}>
                   <TouchableOpacity
                     style={styles.selectItemsButton}
-                    onPress={() => navigation.navigate('Main')}
+                    onPress={() => navigation.replace('Main')}
                     activeOpacity={0.8}
                   >
                     <Text style={styles.buttonText}>Select Items</Text>

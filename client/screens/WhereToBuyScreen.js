@@ -253,8 +253,10 @@ const WhereToBuyScreen = ({ route, navigation }) => {
             <Text style={styles.storeName}>{item.branch}</Text>
             <Text style={styles.storeDetail}>כתובת: {item.address}</Text>
             <Text style={styles.storeDetail}>מחיר כולל: ₪{formatPrice(item.totalPrice ?? item.price ?? 'N/A')}</Text>
+            {/*
             <Text style={styles.storeDetail}>מוצרים עם מחירים: {item.productsWithPrices || item.itemsFound || 0}</Text>
-            <Text style={styles.storeDetail}>מוצרים שנמצאו: {item.productsScraped || item.totalProductsScraped || 0}</Text>
+            */}
+            <Text style={styles.storeDetail}>מוצרים שנמצאו: {item.productsWithPrices ||item.itemsFound || 0}</Text>
             <Text style={styles.storeScore}>Score: {item.scorePercentage || item.score || 'N/A'}</Text>
             {item.availability && (
               <Text style={styles.availabilityText}>{item.availability}</Text>
@@ -372,7 +374,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 40,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',

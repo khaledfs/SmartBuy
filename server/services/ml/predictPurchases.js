@@ -42,7 +42,7 @@ function trainLogisticRegression(data, labels, learningRate = 0.01, iterations =
   return weights;
 }
 
-// Train the ML model
+// Train the ML r
 async function trainModel() {
   try {
     const examples = await TrainingExample.find().lean();

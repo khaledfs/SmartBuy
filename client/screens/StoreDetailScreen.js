@@ -73,7 +73,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
           boughtProducts: boughtProductsWithDetails
         });
         // Navigate back to group list with success
-        navigation.navigate('GroupSharedList', { groupId });
+        navigation.replace('GroupSharedList', { groupId });
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
       }
@@ -165,7 +165,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
       <View style={styles.itemsCard}>
         <Text style={styles.cardTitle}>כל המוצרים</Text>
         <Text style={styles.itemsCount}>
-          {allProducts.length} מוצרים ({realPriceCount} מחירים אמיתיים, {estimatedPriceCount} מחירים משוערים)
+          {allProducts.length} מוצרים ({realPriceCount} מחירים אמיתיים)
         </Text>
         {allProducts.length > 0 ? (
           <>

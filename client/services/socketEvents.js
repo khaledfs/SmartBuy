@@ -55,13 +55,17 @@ export function registerGroupUpdates(callback) {
 export function registerListUpdates(callback) {
   const socket = getSocketInstance();
   if (!socket) return () => {};
-  
-  socket.on('listUpdate', (data) => {
+
+  const handler = (data) => {
     console.log('📢 List update received in registerListUpdates:', data);
     callback(data);
-  });
-  return () => socket.off('listUpdate', callback);
+  };
+
+  socket.on('listUpdate', handler);
+
+  return () => socket.off('listUpdate', handler);
 }
+
 
 /**
  * Listen for suggestion updates (favorites, purchases, etc.)

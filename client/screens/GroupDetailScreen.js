@@ -133,7 +133,7 @@ export default function GroupDetailScreen({ route, navigation }) {
       >
         <TouchableOpacity
           style={[styles.memberChip, ownerTransferMode && !isCurrentOwner ? styles.transferable : null]}
-          onPress={() => {}}
+          onPress={() => { }}
           onLongPress={() => {
             if (ownerTransferMode && !isCurrentOwner && !isMe) handleTransferOwnership(item.user._id);
           }}
@@ -165,6 +165,8 @@ export default function GroupDetailScreen({ route, navigation }) {
           horizontal
           style={{ marginBottom: 20 }}
         />
+
+        {/* Smart Suggestions Button */}
         <View style={styles.actionsRow}>
           <TouchableOpacity style={styles.actionButton} onPress={() => setShowAddModal(true)}>
             <Icon name="person-add" size={22} color="#2E7D32" />
@@ -175,16 +177,16 @@ export default function GroupDetailScreen({ route, navigation }) {
             <Text style={styles.actionButtonText}>Leave Group</Text>
           </TouchableOpacity>
         </View>
-        {/* Smart Suggestions Button */}
+        <TouchableOpacity style={[styles.openListButton, { backgroundColor: '#45B7D1', marginTop: 12 }]} onPress={() => navigation.navigate('SmartSuggestions', { groupId: group._id })}>
+          <Icon name="bulb" size={22} color="#fff" />
+          <Text style={styles.openListButtonText}>Start Shopping</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.openListButton, { backgroundColor: '#2E7D32', marginTop: 12 }]} onPress={() => navigation.navigate('GroupSharedList', { groupId: group._id })}>
           <Icon name="list" size={22} color="#fff" />
           <Text style={styles.openListButtonText}>Open Shared List</Text>
         </TouchableOpacity>
+        
 
-        <TouchableOpacity style={[styles.openListButton, { backgroundColor: '#45B7D1', marginTop: 12 }]} onPress={() => navigation.navigate('SmartSuggestions', { groupId: group._id })}>
-          <Icon name="bulb" size={22} color="#fff" />
-          <Text style={styles.openListButtonText}>Smart Suggestions</Text>
-        </TouchableOpacity>
       </View>
       <Modal visible={showAddModal} animationType="slide" transparent onRequestClose={() => setShowAddModal(false)}>
         <View style={styles.modalOverlay}>

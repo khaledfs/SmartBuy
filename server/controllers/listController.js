@@ -11,25 +11,25 @@ async function authorizeListAccess(listId, userId) {
   console.log('🔐 authorizeListAccess called');
   console.log('listId:', listId);
   console.log('userId:', userId);
-  
+
   const list = await List.findById(listId).populate('group');
   console.log('List found:', !!list);
-  
+
   if (!list) {
     console.log('❌ List not found');
     return null;
   }
-  
+
   console.log('List owner:', list.owner.toString());
   console.log('Is user owner?', list.owner.toString() === userId);
-  
+
   if (list.group) {
     console.log('Group members:', list.group.members);
     // Check if user is in the members array (members are objects with user and role)
     const isInGroup = list.group.members.some(member => member.user.toString() === userId);
     console.log('Is user in group?', isInGroup);
   }
-  
+
   if (
     list.owner.toString() !== userId &&
     !(list.group && list.group.members.some(member => member.user.toString() === userId))
@@ -37,7 +37,7 @@ async function authorizeListAccess(listId, userId) {
     console.log('❌ Access denied - user is not owner or group member');
     return null;
   }
-  
+
   console.log('✅ Access granted');
   return list;
 }
@@ -45,11 +45,11 @@ async function authorizeListAccess(listId, userId) {
 const emitListUpdate = (req, list, action = 'itemUpdated', itemName = null, itemId = null) => {
   const groupId = list.group?.toString();
   const listId = list._id.toString();
-  
+
   console.log(`📢 Emitting listUpdate to group: ${groupId}, list: ${listId}, action: ${action}, item: ${itemName || 'N/A'}`);
-  
+
   const io = req.app.get('io');
-  
+
   const updateData = {
     listId: listId,
     groupId: groupId,
@@ -58,18 +58,18 @@ const emitListUpdate = (req, list, action = 'itemUpdated', itemName = null, item
     itemName: itemName,
     itemId: itemId
   };
-  
+
   // Emit to both group room and list room for comprehensive coverage
   if (groupId) {
     io.to(groupId).emit('listUpdate', updateData);
     console.log(`📢 Emitted to group room: ${groupId} - Action: ${action}, Item: ${itemName || 'N/A'}`);
   }
-  
+
   if (listId) {
     io.to(listId).emit('listUpdate', updateData);
     console.log(`📢 Emitted to list room: ${listId} - Action: ${action}, Item: ${itemName || 'N/A'}`);
   }
-  
+
   // Also emit to owner's room if it's a personal list
   if (!groupId && list.owner) {
     io.to(list.owner.toString()).emit('listUpdate', updateData);
@@ -156,9 +156,11 @@ exports.deleteList = async (req, res) => {
 // POST /lists/:id/items
 exports.addItemToList = async (req, res) => {
   try {
+    const jojo = req.body
     const { name, quantity = 1, productId, icon, barcode } = req.body;
+    console.log("khaled here " + jojo.name + " " + jojo.quantity + " " + jojo.productId + " " + jojo.barcode)
     const listId = req.params.id;
-    
+
     const list = await authorizeListAccess(listId, req.userId);
     if (!list) {
       console.log('Access denied to list');
@@ -312,7 +314,7 @@ exports.addItemToListById = async (req, res) => {
 exports.deleteItemById = async (req, res) => {
   try {
     const { id: listId, itemId } = req.params;
-    
+
     const list = await authorizeListAccess(listId, req.userId);
     if (!list) {
       console.log('Access denied to list');
@@ -327,7 +329,7 @@ exports.deleteItemById = async (req, res) => {
     // Remove item from list
     list.items = list.items.filter(id => id.toString() !== itemId);
     await list.save();
-    
+
     // Delete the item
     await Item.findByIdAndDelete(itemId);
 
@@ -346,7 +348,7 @@ exports.deleteItemById = async (req, res) => {
 exports.markItemAsBought = async (req, res) => {
   try {
     const { id: listId, itemId } = req.params;
-    
+
     const list = await authorizeListAccess(listId, req.userId);
     if (!list) {
       console.log('Access denied to list');
@@ -384,7 +386,7 @@ exports.markItemAsBought = async (req, res) => {
     // Remove item from list
     list.items = list.items.filter(id => id.toString() !== itemId);
     await list.save();
-    
+
     // Delete the item
     await Item.findByIdAndDelete(itemId);
 
@@ -397,4 +399,3 @@ exports.markItemAsBought = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-

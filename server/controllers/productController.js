@@ -12,7 +12,7 @@ function getProductsFromJson() {
     return productsCache;
   }
   try {
-    const productsPath = path.resolve(__dirname, '../scripts/products.json');
+    const productsPath = path.resolve(__dirname, '../scripts/products_safe_updated.json');
     const data = fs.readFileSync(productsPath, 'utf-8');
     const products = JSON.parse(data);
     productsCache = products;

@@ -162,10 +162,10 @@ export default function GroupListScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.navigate('Main')}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.replace('Main')}>
           <Icon name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Group</Text>
+        <Text style={styles.headerTitle}>My Groups</Text>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
         {groups.length === 0 ? (
