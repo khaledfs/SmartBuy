@@ -15,7 +15,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import jwtDecode from 'jwt-decode';
 import { initializeSocketAfterLogin } from '../services/socket';
 
 const { width, height } = Dimensions.get('window');
