@@ -53,7 +53,7 @@ export default function MainScreen({ navigation }) {
   const [compareResults, setCompareResults] = useState([]);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareCity, setCompareCity] = useState('');
-  const [tripTypeModalVisible, setTripTypeModalVisible] = useState(false);
+  const [tripTypeModalVisible, setTripTypeModalVisible] = useState(true);
   const [newGroupNotification, setNewGroupNotification] = useState(false);
 
   const { personalList, setPersonalList, lastBought, lastStore } = useContext(PersonalListProvider._context || require('../services/PersonalListContext').default);
@@ -61,6 +61,19 @@ export default function MainScreen({ navigation }) {
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_700Bold,
   });
+
+
+  useEffect(() => {
+    setTripTypeModalVisible(true);
+  }, []);
+
+ useFocusEffect(
+    useCallback(() => {
+      // screen just focused
+      setTripTypeModalVisible(true);
+      // no cleanup needed
+    }, [])
+  );
 
   useEffect(() => {
     const fetchLocationName = async () => {
@@ -86,7 +99,6 @@ export default function MainScreen({ navigation }) {
   }, []);
 
   const logout = async () => {
-    // Disconnect socket before logout
     disconnectSocket();
     await AsyncStorage.removeItem('token');
     navigation.replace('Login');
@@ -102,7 +114,7 @@ export default function MainScreen({ navigation }) {
       if (!token) navigation.replace('Login');
       else fetchGroups();
     };
-    
+
     // Handle group notifications
     const unsubscribe = registerGroupNotifications((data) => {
       if (data.groupCreated) {
@@ -196,22 +208,22 @@ export default function MainScreen({ navigation }) {
     try {
       setSearchLoading(true);
       console.log('🔍 Searching for:', query);
-      
+
       // Search the ENTIRE database without pagination limits for search
       // Use a higher limit to get more comprehensive search results
       const response = await api.get(`/products?q=${encodeURIComponent(query)}&limit=500`);
       const searchResults = response.data || [];
-      
+
       console.log('🔍 Search results:', searchResults.length, 'products found');
-      
+
       // Filter to only show products with valid images
       const validResults = searchResults.filter(product => {
         const img = product.img || product.image;
         return img && img !== '' && img !== 'https://via.placeholder.com/100' && img !== 'null';
       });
-      
+
       console.log('🔍 Valid results after image filtering:', validResults.length, 'products');
-      
+
       setSearchResults(validResults);
       setFilteredProducts(validResults);
       setSearchLoading(false);
@@ -232,25 +244,25 @@ export default function MainScreen({ navigation }) {
     if (searchTerm.trim()) {
       return;
     }
-    
+
     setIsLoading(true);
     try {
       console.log('📦 Fetching products:', reset ? 'initial' : 'pagination', 'offset:', reset ? 0 : offset);
-      
+
       // Fetch products with pagination
       const res = await api.get(`/products?limit=20&offset=${reset ? 0 : offset}`);
       const products = res.data || [];
-      
+
       console.log('📦 Received products:', products.length);
-      
+
       // Filter to only show products with valid images (same as ALL card)
       const validProducts = products.filter(product => {
         const img = product.img || product.image;
         return img && img !== '' && img !== 'https://via.placeholder.com/100' && img !== 'null';
       });
-      
+
       console.log('📦 Valid products:', validProducts.length);
-      
+
       if (reset) {
         setProducts(validProducts);
         setFilteredProducts(validProducts);
@@ -279,7 +291,7 @@ export default function MainScreen({ navigation }) {
   // On scroll to end, fetch more products (Instagram-style infinite scroll)
   const handleEndReached = () => {
     console.log('📜 End reached - isLoading:', isLoading, 'hasMore:', hasMore, 'searchTerm:', searchTerm.trim());
-    
+
     // Only fetch more if not searching and not already loading
     if (!isLoading && hasMore && !searchTerm.trim()) {
       console.log('📜 Fetching more products...');
@@ -438,7 +450,7 @@ export default function MainScreen({ navigation }) {
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.welcomeSection}>
-          <Text style={[styles.welcomeText, { fontFamily: 'PlayfairDisplay_700Bold', fontSize: 38, color: '#000000ff', letterSpacing: 1 }]}>Welcome</Text>
+          <Text style={[styles.welcomeText, { fontFamily: 'PlayfairDisplay_700Bold', fontSize: 38, color: '#2E7D32', letterSpacing: 1 }]}>s</Text>
           {locationName && (
             <View style={styles.locationContainer}>
               <Ionicons name="location" size={16} color="#666" />
@@ -544,7 +556,7 @@ export default function MainScreen({ navigation }) {
         <TouchableOpacity
           style={styles.navButton}
           onPress={() => {
-            navigation.replace('GroupList');
+            navigation.navigate('GroupList');
             setNewGroupNotification(false); // Clear notification when visiting
           }}
         >
@@ -574,22 +586,25 @@ export default function MainScreen({ navigation }) {
       {/* Removed Compare Prices button from home page as per user request */}
 
       {/* Trip Type Selection Modal */}
-      <Modal 
-        visible={tripTypeModalVisible} 
-        animationType="slide" 
-        transparent={true}
-        onRequestClose={() => setTripTypeModalVisible(false)}
+      <Modal
+        visible={tripTypeModalVisible}
+        animationType="slide"
+        transparent
+        // prevent Android from auto-closing the modal
+        onRequestClose={() => { /* do nothing – force a choice */ }}
+        statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
           <View style={styles.tripTypeModal}>
             <Text style={styles.modalTitle}>Choose Trip Type</Text>
             <Text style={styles.modalSubtitle}>Select how you want to compare store prices</Text>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.tripOption}
               onPress={() => {
                 setTripTypeModalVisible(false);
-                navigation.navigate('MyList'); // Navigate to Personal List Page
+                // TODO: navigate to your personal flow here
+                // navigation.navigate('PersonalList');
               }}
             >
               <View style={styles.tripOptionIcon}>
@@ -598,12 +613,12 @@ export default function MainScreen({ navigation }) {
               <Text style={styles.tripOptionText}>Personal Trip</Text>
               <Text style={styles.tripOptionSubtext}>Compare prices for your personal shopping list</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.tripOption}
               onPress={() => {
                 setTripTypeModalVisible(false);
-                navigation.navigate('GroupList'); // Navigate to Group List Page
+                navigation.navigate('GroupList');
               }}
             >
               <View style={styles.tripOptionIcon}>
@@ -612,17 +627,14 @@ export default function MainScreen({ navigation }) {
               <Text style={styles.tripOptionText}>Group Trip</Text>
               <Text style={styles.tripOptionSubtext}>Compare prices for group shopping</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.cancelButton}
-              onPress={() => setTripTypeModalVisible(false)}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+
+            {/* Remove the Cancel button to make the choice required */}
+            {/* <TouchableOpacity style={styles.cancelButton} onPress={() => setTripTypeModalVisible(false)}>
+        <Text style={styles.cancelButtonText}>Cancel</Text>
+      </TouchableOpacity> */}
           </View>
         </View>
       </Modal>
-
 
     </SafeAreaView>
   );
