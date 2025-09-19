@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, TextInput, FlatList, ActivityIndicator, S
 import * as Location from 'expo-location';
 import LottieView from 'lottie-react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { toHebrewCity } from '../utils/cityMapper';
 
 import api from '../services/api';
 import PersonalListContext from '../services/PersonalListContext';
@@ -10,7 +11,6 @@ import PersonalListContext from '../services/PersonalListContext';
 const WhereToBuyScreen = ({ route, navigation }) => {
   const { products: routeProducts, source, tripType, groupId, currentUserId, groupCreatorId } = route.params || {};
   const [products, setProducts] = useState(routeProducts || []);
-  console.log('WhereToBuyScreen params:', route.params);
   const [locationMethod, setLocationMethod] = useState(null); // 'gps' or 'manual'
   const [city, setCity] = useState('');
   const [cityInputVisible, setCityInputVisible] = useState(false);
@@ -58,28 +58,53 @@ const WhereToBuyScreen = ({ route, navigation }) => {
     setLoading(true);
     setLocationMethod('gps');
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      console.log('[GPS] Requesting permission…');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      console.log('[GPS] Permission status:', status);
+
       if (status !== 'granted') {
         setError('Permission to access location was denied');
         setLoading(false);
         return;
       }
-      let loc = await Location.getCurrentPositionAsync({});
-      let geocode = await Location.reverseGeocodeAsync({
+
+      const loc = await Location.getCurrentPositionAsync({});
+      console.log('[GPS] Coordinates:', loc.coords);
+
+      const geocode = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
-      console.log('Geocode result:', geocode);
-      let cityName = geocode[0]?.city || geocode[0]?.region || geocode[0]?.district || geocode[0]?.subregion;
+      console.log('[GPS] Reverse geocode raw:', geocode);
+
+      const g = geocode?.[0] || {};
+      // Try a few plausible fields iOS/Android may populate
+      const cityName =
+        g.city ||
+        g.locality ||
+        g.subregion ||
+        g.district ||
+        g.region ||
+        g.name ||
+        null;
+
+      console.log('[GPS] Picked city field:', cityName);
+
       if (!cityName) {
         setError('Could not determine your city from GPS.');
         setLoading(false);
         return;
       }
-      setCity(cityName); // Fix: Update the city state
-      fetchStores({ city: cityName });
+
+      const hebCity = toHebrewCity(cityName) || cityName; // fallback to original if not mapped
+      console.log('[GPS] Mapped city to Hebrew:', hebCity, '(from:', cityName, ')');
+
+      setCity(hebCity);
+      await fetchStores({ city: hebCity });
     } catch (e) {
+      console.log('[GPS] Error:', e);
       setError('Failed to get location.');
+    } finally {
       setLoading(false);
     }
   };
@@ -124,7 +149,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
       if (!response.ok) throw new Error('Failed to fetch stores');
       const data = await response.json();
       console.log('Store data received:', Array.isArray(data) ? `${data.length} stores` : 'No stores found');
-      
+
       setStores(Array.isArray(data) ? data.slice(0, 5) : (data.stores?.slice(0, 5) || []));
     } catch (e) {
       setError('Could not fetch store data.');
@@ -140,10 +165,10 @@ const WhereToBuyScreen = ({ route, navigation }) => {
         // Get the products that were actually found/bought from this store
         const foundBarcodes = selectedStore.foundBarcodes || [];
         const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
+
         console.log('Products to mark as bought:', boughtProducts.map(p => p.name));
         console.log('Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
+
         // Get the scraped product details (including images) from the store data
         const boughtProductsWithDetails = boughtProducts.map(p => {
           const scrapedDetails = selectedStore.productDetails?.[p.barcode];
@@ -157,11 +182,12 @@ const WhereToBuyScreen = ({ route, navigation }) => {
             productId: p.productId || p.product || null
           };
         });
-        
+
         await api.post(`/groups/${groupId}/list/complete-trip`, {
           store: {
             branch: selectedStore.branch,
             address: selectedStore.address,
+            itemPrices: selectedStore.itemPrices,
             totalPrice: selectedStore.totalPrice ?? selectedStore.price ?? null,
           },
           boughtProducts: boughtProductsWithDetails
@@ -176,35 +202,60 @@ const WhereToBuyScreen = ({ route, navigation }) => {
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
       }
-    } else if (tripType === 'personal') {
+    } // inside your personal branch
+    else if (tripType === 'personal') {
       console.log('Personal trip buy logic triggered');
       try {
-        // Get the products that were actually found/bought from this store
-        const foundBarcodes = selectedStore.foundBarcodes || [];
-        const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
-        // Ensure bought products have image data
-        const boughtProductsWithImages = boughtProducts.map(product => ({
-          ...product,
-          img: product.image || product.img || product.icon, // Preserve image data
-          icon: product.image || product.img || product.icon, // Backup image field
-        }));
-        
+        // 1) Build itemPrices map if present
+        const itemPrices = (selectedStore.itemPrices && typeof selectedStore.itemPrices === 'object')
+          ? Object.entries(selectedStore.itemPrices).reduce((acc, [bc, price]) => {
+            const n = parseFloat(price);
+            if (!isNaN(n)) acc[bc] = n;
+            return acc;
+          }, {})
+          : (selectedStore.productDetails
+            ? Object.entries(selectedStore.productDetails).reduce((acc, [bc, d]) => {
+              const n = parseFloat(d?.price);
+              if (!isNaN(n)) acc[bc] = n;
+              return acc;
+            }, {})
+            : {});
+
+        // 2) Barcodes actually bought (price > 0). Fallback: foundBarcodes
+        const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
+
+        const foundBarcodes = Array.isArray(selectedStore.foundBarcodes) ? selectedStore.foundBarcodes : [];
+        const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
+
+        // 3) Map products with images
+        const boughtProductsWithImages = products
+          .filter(p => barcodesBought.includes(p.barcode))
+          .map(product => ({
+            ...product,
+            img: product.image || product.img || product.icon,
+            icon: product.image || product.img || product.icon,
+          }));
+
         console.log('Personal trip - Products to mark as bought:', boughtProductsWithImages.map(p => p.name));
-        console.log('Personal trip - Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
+        console.log('Personal trip - Products that will be kept:', products.filter(p => !barcodesBought.includes(p.barcode)).map(p => p.name));
+
+        // 4) Call completeTrip (see implementation tweak below)
         completeTrip({
           branch: selectedStore.branch || selectedStore.storeName,
           address: selectedStore.address,
           totalPrice: selectedStore.totalPrice ?? selectedStore.price ?? null,
-        }, boughtProductsWithImages);
-        console.log('Navigating to TransitionScreenPersonal');
+          itemPrices, // optional but useful to store
+        }, boughtProductsWithImages, barcodesBought); // pass the bought barcodes
+
         navigation.replace('TransitionScreenPersonal');
       } catch (err) {
         console.log('Error in personal trip buy logic:', err);
         Alert.alert('Error', 'Failed to complete personal trip');
       }
-    } else {
+    }
+    else {
       console.log('Unknown or missing tripType:', tripType);
       Alert.alert('Error', 'Unknown or missing trip type.');
     }
@@ -226,27 +277,27 @@ const WhereToBuyScreen = ({ route, navigation }) => {
     const foundBarcodes = item.foundBarcodes || (item.foundProducts ? item.foundProducts.map(p => p.barcode) : []);
     const foundProducts = products.filter(p => foundBarcodes.includes(p.barcode));
     const notFoundProducts = products.filter(p => !foundBarcodes.includes(p.barcode));
-    
+
     return (
       <View style={styles.storeCard}>
         {/* Store Header with Icon */}
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('StoreDetail', { 
-            store: item, 
-            products, 
-            tripType, 
-            groupId, 
-            currentUserId, 
-            groupCreatorId 
-          })} 
+        <TouchableOpacity
+          onPress={() => navigation.navigate('StoreDetail', {
+            store: item,
+            products,
+            tripType,
+            groupId,
+            currentUserId,
+            groupCreatorId
+          })}
           activeOpacity={0.8}
           style={styles.storeHeader}
         >
           <View style={styles.storeIconContainer}>
-            <Ionicons 
-              name={getStoreIcon(item.branch)} 
-              size={32} 
-              color="#1976D2" 
+            <Ionicons
+              name={getStoreIcon(item.branch)}
+              size={32}
+              color="#1976D2"
             />
           </View>
           <View style={styles.storeInfo}>
@@ -256,8 +307,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
             {/*
             <Text style={styles.storeDetail}>מוצרים עם מחירים: {item.productsWithPrices || item.itemsFound || 0}</Text>
             */}
-            <Text style={styles.storeDetail}>מוצרים שנמצאו: {item.productsWithPrices ||item.itemsFound || 0}</Text>
-            <Text style={styles.storeScore}>Score: {item.scorePercentage || item.score || 'N/A'}</Text>
+            <Text style={styles.storeDetail}>מוצרים שנמצאו: {item.productsWithPrices || item.itemsFound || 0}</Text>
             {item.availability && (
               <Text style={styles.availabilityText}>{item.availability}</Text>
             )}
@@ -267,7 +317,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
           </View>
           <Ionicons name="chevron-forward" size={24} color="#666" />
         </TouchableOpacity>
-        
+
         {/* Buy Button */}
         {(tripType === 'group' && groupId) || tripType === 'personal' ? (
           <TouchableOpacity style={styles.buyButton} onPress={() => handleBuy(item)}>
@@ -282,8 +332,8 @@ const WhereToBuyScreen = ({ route, navigation }) => {
     <View style={styles.container}>
       {/* Clean Professional Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton} 
+        <TouchableOpacity
+          style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
           <Ionicons name="arrow-back" size={24} color="#333" />
@@ -339,11 +389,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
         />
       )}
       {/* Buy button for group trip */}
-      {tripType === 'group' && groupId && stores.length > 0 && (
-        <TouchableOpacity style={styles.completeTripButton} onPress={() => handleBuy(stores[0])}>
-          <Text style={styles.completeTripButtonText}>Buy (Complete Group Trip)</Text>
-        </TouchableOpacity>
-      )}
+
       {/* Celebration animation */}
       {showCelebration && (
         <View style={styles.celebrationOverlay}>
@@ -365,8 +411,8 @@ const WhereToBuyScreen = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
+  container: {
+    flex: 1,
     backgroundColor: '#f8f9fa',
   },
   header: {
@@ -399,19 +445,19 @@ const styles = StyleSheet.create({
   headerRight: {
     width: 40,
   },
-  mainTitle: { 
-    fontSize: 28, 
-    fontWeight: 'bold', 
-    marginBottom: 20, 
+  mainTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 20,
     alignSelf: 'center',
     color: '#333',
     textAlign: 'center',
     marginTop: 20,
     paddingHorizontal: 20,
   },
-  cardRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  cardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 20,
     gap: 15,
     paddingHorizontal: 20,
@@ -437,15 +483,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  cardText: { 
-    fontSize: 16, 
+  cardText: {
+    fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
     color: '#333',
   },
-  cityInputContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
+  cityInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 10,
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -469,10 +515,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 8,
   },
-  citySubmitText: { 
-    color: '#fff', 
-    fontWeight: 'bold', 
-    fontSize: 16 
+  citySubmitText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16
   },
   loadingContainer: {
     alignItems: 'center',
@@ -484,9 +530,9 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
     fontWeight: 'bold',
   },
-  error: { 
-    color: '#FF6B6B', 
-    marginTop: 20, 
+  error: {
+    color: '#FF6B6B',
+    marginTop: 20,
     textAlign: 'center',
     fontSize: 16,
     paddingHorizontal: 20,
@@ -532,12 +578,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 20,
   },
-  storeScore: {
-    fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: 'bold',
-    marginTop: 8,
-  },
   availabilityText: {
     fontSize: 12,
     color: '#1976D2',
@@ -576,10 +616,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 18,
   },
-  noResults: { 
-    color: '#888', 
-    marginTop: 30, 
-    textAlign: 'center', 
+  noResults: {
+    color: '#888',
+    marginTop: 30,
+    textAlign: 'center',
     fontSize: 16,
     paddingHorizontal: 20,
   },
