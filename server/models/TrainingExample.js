@@ -7,24 +7,22 @@ const trainingExampleSchema = new mongoose.Schema({
     required: true
   },
   productId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product',
+    type: String,
     required: true
   },
   features: {
     bias: { type: Number, default: 1 },
     isFavorite: { type: Number, default: 0 },
-    purchasedBefore: { type: Number, default: 0 },
-    timesPurchased: { type: Number, default: 0 },
-    recentlyPurchased: { type: Number, default: 0 },
-    storeCount: { type: Number, default: 0 },
-    timesWasRejectedByUser: { type: Number, default: 0 },
-    timesWasRejectedByCart: { type: Number, default: 0 }
+    addedBefore: { type: Number, default: 0 },
+    recentlyadded: { type: Number, default: 0 },
+    timesAdded: { type: Number, default: 0 },
+    AddedFrequency: { type: Number, default: 0 },
+    timesRejected: { type: Number, default: 0 },
   },
   label: {
     type: Number,
     required: true,
-    enum: [0, 1] // 0 = not purchased, 1 = purchased
+    enum: [0, 1]
   },
   context: {
     listId: {
