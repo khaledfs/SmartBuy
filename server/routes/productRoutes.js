@@ -1,6 +1,6 @@
 // routes/productRoutes.js
 const express = require('express')
-const router  = express.Router()
+const router = express.Router()
 const Product = require('../models/Product')
 const productController = require('../controllers/productController');
 const path = require('path'); // For path operations
@@ -39,7 +39,7 @@ router.get('/', async (req, res) => {
       // For infinite scroll, we need consistent random sampling
       // Use a seed-based approach for better pagination
       const totalCount = await Product.countDocuments();
-      
+
       if (totalCount <= maxProducts + skip) {
         // If we need most/all products, just get them all
         products = await Product.find().lean();
@@ -54,7 +54,7 @@ router.get('/', async (req, res) => {
           { $skip: skip },
           { $limit: maxProducts }
         ]);
-        
+
         // If we don't have enough products after sampling, get more
         if (products.length < maxProducts) {
           const remainingNeeded = maxProducts - products.length;
@@ -78,16 +78,20 @@ router.get('/', async (req, res) => {
     products = products
       .map(p => ({
         ...p,
+        productIds: p._id,
         img: suggestionController.getValidImage(p.img)
       }));
 
     console.log(`📦 Products API: ${products.length} products returned from MongoDB (${req.query.limit || 20} limit, ${req.query.offset || 0} offset)`);
-    console.log(`🔍 Sample products:`, products.slice(0, 3).map(p => ({ 
-      name: p.name, 
-      hasImage: !!p.img, 
+    console.log(`🔍 Sample products:`, products.slice(0, 3).map(p => ({
+      name: p.name,
+      hasImage: !!p.img,
       imageType: p.img ? p.img.substring(0, 30) : 'none',
       isPlaceholder: p.img === 'https://via.placeholder.com/100'
     })));
+    products.map(p => {
+      console.log(p)
+    })
     res.json(products);
   } catch (err) {
     console.error('❌ Products API Error:', err.message);
@@ -101,20 +105,20 @@ router.get('/:id', productController.getProductById);
 router.post('/batch', async (req, res) => {
   try {
     const { productIds } = req.body;
-    
+
     if (!Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({ error: 'productIds array is required' });
     }
-    
+
     // Limit to prevent abuse
     const limitedIds = productIds.slice(0, 50);
-    
-    const products = await Product.find({ 
-      _id: { $in: limitedIds } 
+
+    const products = await Product.find({
+      _id: { $in: limitedIds }
     }).select('name img barcode category price').lean();
-    
+
     console.log(`📦 Batch API: ${products.length} products returned for ${limitedIds.length} requested IDs`);
-    
+
     res.json(products);
   } catch (err) {
     console.error('❌ Batch Products API Error:', err.message);
