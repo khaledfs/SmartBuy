@@ -11,9 +11,8 @@ const weightsSchema = new mongoose.Schema({
       'purchasedBefore',
       'timesPurchased',
       'recentlyPurchased',
-      'storeCount',
-      'timesWasRejectedByUser',
-      'timesWasRejectedByCart'
+      'timesRejected',
+      'purchaseFrequency'
     ]
   },
   weight: {
