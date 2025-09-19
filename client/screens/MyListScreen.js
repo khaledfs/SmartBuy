@@ -1,6 +1,8 @@
 // client/screens/MyListScreen.js
 import React, { useContext, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, SafeAreaView, Image, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { Ionicons } from '@expo/vector-icons';
 import PersonalListContext from '../services/PersonalListContext';
 import { PersonalListProvider } from '../services/PersonalListContext';
