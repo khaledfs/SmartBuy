@@ -3,10 +3,19 @@ const Product = require('../models/Product');
 const Group = require('../models/Group');
 const TrainingExample = require('../models/TrainingExample');
 const { extractFeaturesForProduct } = require('../services/ml/features');
+const { Types } = require('mongoose');
 
 // POST /api/rejections - Reject a product suggestion
 exports.rejectProduct = async (req, res) => {
   const { productId, groupId } = req.body;
+  const userId = req.user?.id || req.userId; // وحّد مصدر هوية المستخدم
+
+  if (!productId || !Types.ObjectId.isValid(productId)) {
+    return res.status(400).json({ message: 'Invalid product ID' });
+  }
+  if (groupId && !Types.ObjectId.isValid(groupId)) {
+    return res.status(400).json({ message: 'Invalid group ID' });
+  }
 
   if (!productId) {
     return res.status(400).json({ message: 'Product ID is required' });
@@ -16,13 +25,15 @@ exports.rejectProduct = async (req, res) => {
     // Check if product exists
     const product = await Product.findById(productId);
     if (!product) {
+      console.log("Product not found  for rejection:", productId);
       return res.status(404).json({ message: 'Product not found' });
     }
 
     // If groupId provided, verify user is member
     if (groupId) {
       const group = await Group.findById(groupId);
-      if (!group || !group.members.includes(req.userId)) {
+      if (!group) {
+        console.log("User not in group for rejection:", req.userId, groupId);
         return res.status(403).json({ message: 'Not authorized for this group' });
       }
     }
@@ -97,11 +108,11 @@ exports.removeRejection = async (req, res) => {
   const { groupId } = req.query;
 
   try {
-    const query = { 
-      productId: productId, 
-      rejectedBy: req.userId 
+    const query = {
+      productId: productId,
+      rejectedBy: req.userId
     };
-    
+
     if (groupId) {
       query.groupId = groupId;
     }
