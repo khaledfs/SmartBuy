@@ -28,10 +28,10 @@ const StoreDetailScreen = ({ route, navigation }) => {
   const realPrices = store.realPrices || {};
   const estimatedPrices = store.estimatedPrices || {};
   const itemPrices = store.itemPrices || {};
-  
+
   // All products should now have prices (real or estimated)
   const allProducts = products;
-  
+
   // Use the backend-calculated totals and counts
   const realPriceCount = store.realPriceCount || Object.keys(realPrices).length;
   const estimatedPriceCount = store.estimatedPriceCount || Object.keys(estimatedPrices).length;
@@ -41,82 +41,109 @@ const StoreDetailScreen = ({ route, navigation }) => {
 
   const handleBuy = async () => {
     console.log('Buy button pressed', { tripType, store });
+
     if (tripType === 'group' && groupId) {
       try {
-        // Get the products that were actually found/bought from this store
-        const foundBarcodes = store.foundBarcodes || [];
-        const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
-        console.log('Products to mark as bought:', boughtProducts.map(p => p.name));
-        console.log('Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
-        // Get the scraped product details (including images) from the store data
-        const boughtProductsWithDetails = boughtProducts.map(p => {
-          const scrapedDetails = store.productDetails?.[p.barcode];
-          return {
-            _id: p._id,
-            barcode: p.barcode,
-            name: scrapedDetails?.name || p.name,
-            quantity: p.quantity || 1,
-            img: scrapedDetails?.img || p.img,
-            icon: scrapedDetails?.icon || p.icon,
-            productId: p.productId || p.product || null
-          };
-        });
-        
+        // 1) Build itemPrices as { [barcode]: number }
+        //   Prefer store.itemPrices if already present; otherwise derive from store.productDetails / foundProducts
+        const itemPrices =
+          (store.itemPrices && typeof store.itemPrices === 'object')
+            ? Object.entries(store.itemPrices).reduce((acc, [bc, price]) => {
+              const n = parseFloat(price);
+              if (!isNaN(n)) acc[bc] = n;
+              return acc;
+            }, {})
+            : (store.productDetails
+              ? Object.entries(store.productDetails).reduce((acc, [bc, d]) => {
+                const n = parseFloat(d?.price);
+                if (!isNaN(n)) acc[bc] = n;
+                return acc;
+              }, {})
+              : {});
+
+        // 2) Positive-price barcodes
+        const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
+
+        // 3) Fallback: merge with foundBarcodes if present
+        const foundBarcodes = Array.isArray(store.foundBarcodes) ? store.foundBarcodes : [];
+        const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
+
+        // 4) Map products -> boughtProducts with details
+        const boughtProducts = products
+          .filter(p => barcodesBought.includes(p.barcode))
+          .map(p => {
+            const scraped = store.productDetails?.[p.barcode];
+            return {
+              _id: p._id,
+              barcode: p.barcode,
+              name: scraped?.name || p.name,
+              quantity: p.quantity || 1,
+              img: scraped?.img || p.img || p.icon,
+              icon: scraped?.icon || p.icon || p.img,
+              productId: p.productId || p.product || null,
+            };
+          });
+
+        // 5) Send the SAME shape the server expects
         await api.post(`/groups/${groupId}/list/complete-trip`, {
           store: {
-            branch: store.branch,
+            branch: store.branch || store.storeName,
             address: store.address,
+            itemPrices,
             totalPrice: store.totalPrice ?? store.price ?? null,
           },
-          boughtProducts: boughtProductsWithDetails
+          boughtProducts,
         });
-        // Navigate back to group list with success
+
         navigation.replace('GroupSharedList', { groupId });
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
       }
     } else if (tripType === 'personal') {
-      console.log('Personal trip buy logic triggered');
       try {
-        // Get the products that were actually found/bought from this store
-        const foundBarcodes = store.foundBarcodes || [];
-        const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
-        console.log('Personal trip - Products to mark as bought:', boughtProducts.map(p => p.name));
-        console.log('Personal trip - Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
+        const itemPrices = (store.itemPrices && typeof store.itemPrices === 'object') ? store.itemPrices : {};
+        const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
+
+        const foundBarcodes = Array.isArray(store.foundBarcodes) ? store.foundBarcodes : [];
+        const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
+
+        const boughtProducts = products.filter(p => barcodesBought.includes(p.barcode))
+          .map(p => ({ ...p, img: p.image || p.img || p.icon, icon: p.image || p.img || p.icon }));
+
         completeTrip({
           branch: store.branch || store.storeName,
           address: store.address,
           totalPrice: store.totalPrice ?? store.price ?? null,
         }, boughtProducts);
-        console.log('Navigating to TransitionScreenPersonal');
+
         navigation.replace('TransitionScreenPersonal');
       } catch (err) {
         console.log('Error in personal trip buy logic:', err);
         Alert.alert('Error', 'Failed to complete personal trip');
       }
     } else {
-      console.log('Unknown or missing tripType:', tripType);
       Alert.alert('Error', 'Unknown or missing trip type.');
     }
   };
 
-  const renderItemCard = (product) => {
+
+  const renderItemCard = (product, index) => {
     // Get the actual product image and details from store data if available
     const productDetails = store.productDetails?.[product.barcode];
     const displayName = productDetails?.name || product.name;
     const displayImage = productDetails?.img || product.image || product.img || product.icon;
-    const displayPrice = itemPrices[product.barcode] || 0;
+    const displayPrice = itemPrices[product.barcode] || '--';
     const isEstimated = estimatedPrices[product.barcode] || productDetails?.isEstimated;
-    
+
     return (
-      <View key={product.barcode} style={[styles.itemCard, isEstimated && styles.estimatedItemCard]}>
-        <Image 
-          source={displayImage ? { uri: displayImage } : require('../assets/favicon.png')} 
-          style={[styles.itemImage, isEstimated && styles.estimatedImage]} 
+      <View key={index} style={[styles.itemCard, isEstimated && styles.estimatedItemCard]}>
+        <Image
+          source={displayImage ? { uri: displayImage } : require('../assets/favicon.png')}
+          style={[styles.itemImage, isEstimated && styles.estimatedImage]}
         />
         <View style={styles.itemInfo}>
           <Text style={[styles.itemName, isEstimated && styles.estimatedText]} numberOfLines={2}>
@@ -124,10 +151,10 @@ const StoreDetailScreen = ({ route, navigation }) => {
           </Text>
           <View style={styles.priceContainer}>
             <Text style={[
-              styles.itemPrice, 
+              styles.itemPrice,
               isEstimated && { color: '#ff9800', fontWeight: 'bold' } // Orange for estimated prices
             ]}>
-              ₪{displayPrice}
+              {displayPrice === '--' ? displayPrice : `₪${displayPrice}`}
             </Text>
             {isEstimated && (
               <Text style={styles.estimatedLabel}>מחיר משוער</Text>
@@ -144,16 +171,16 @@ const StoreDetailScreen = ({ route, navigation }) => {
       <View style={styles.storeInfoCard}>
         <View style={styles.storeHeader}>
           <View style={styles.storeIconContainer}>
-            <Ionicons 
-              name={getStoreIcon(store.branch)} 
-              size={40} 
-              color="#1976D2" 
+            <Ionicons
+              name={getStoreIcon(store.branch)}
+              size={40}
+              color="#1976D2"
             />
           </View>
           <View style={styles.storeDetails}>
             <Text style={styles.storeName}>{store.branch}</Text>
             <Text style={styles.storeAddress}>{store.address}</Text>
-            <Text style={styles.storeTotal}>מחיר אמיתי: ₪{store.totalPrice || 'N/A'}</Text>
+            <Text style={styles.storeTotal}>מחיר : ₪{store.totalPrice || 'N/A'}</Text>
             {store.distance !== null && store.distance !== undefined && (
               <Text style={styles.storeDistance}>מרחק: {store.distance} ק"מ</Text>
             )}
@@ -165,20 +192,16 @@ const StoreDetailScreen = ({ route, navigation }) => {
       <View style={styles.itemsCard}>
         <Text style={styles.cardTitle}>כל המוצרים</Text>
         <Text style={styles.itemsCount}>
-          {allProducts.length} מוצרים ({realPriceCount} מחירים אמיתיים)
+          {allProducts.length} מוצרים
         </Text>
         {allProducts.length > 0 ? (
           <>
             <ScrollView style={styles.itemsList}>
-              {allProducts.map(product => renderItemCard(product))}
+              {allProducts.map((product, index) => renderItemCard(product, index))}
             </ScrollView>
             <View style={styles.totalSection}>
-              <Text style={styles.totalText}>סה"כ מחירים אמיתיים: ₪{totalPrice.toFixed(2)}</Text>
-              {estimatedPriceTotal > 0 && (
-                <Text style={styles.estimatedTotalText}>
-                  מחירים משוערים נוספים: ₪{estimatedPriceTotal.toFixed(2)}
-                </Text>
-              )}
+              <Text style={styles.totalText}>סה"כ : ₪{totalPrice.toFixed(2)}</Text>
+
             </View>
           </>
         ) : (
