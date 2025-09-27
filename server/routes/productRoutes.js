@@ -3,9 +3,8 @@ const express = require('express')
 const router = express.Router()
 const Product = require('../models/Product')
 const productController = require('../controllers/productController');
-const path = require('path'); // For path operations
 
-// Add this function at the top
+// Utility to shuffle an array so we can return different products on each request
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -43,7 +42,9 @@ router.get('/', async (req, res) => {
       if (totalCount <= maxProducts + skip) {
         // If we need most/all products, just get them all
         products = await Product.find().lean();
+        // Shuffle to return different products on each request
         shuffleArray(products);
+        // Then slice for pagination
         products = products.slice(skip, skip + maxProducts);
       } else {
         // For infinite scroll, use consistent random sampling
@@ -83,15 +84,8 @@ router.get('/', async (req, res) => {
       }));
 
     console.log(`📦 Products API: ${products.length} products returned from MongoDB (${req.query.limit || 20} limit, ${req.query.offset || 0} offset)`);
-    console.log(`🔍 Sample products:`, products.slice(0, 3).map(p => ({
-      name: p.name,
-      hasImage: !!p.img,
-      imageType: p.img ? p.img.substring(0, 30) : 'none',
-      isPlaceholder: p.img === 'https://via.placeholder.com/100'
-    })));
-    products.map(p => {
-      console.log(p)
-    })
+   
+    
     res.json(products);
   } catch (err) {
     console.error('❌ Products API Error:', err.message);
@@ -126,13 +120,6 @@ router.post('/batch', async (req, res) => {
   }
 });
 
-// POST /api/products
-router.post('/', async (req, res) => { /* ... */ })
 
-// PATCH /api/products/:id
-router.patch('/:id', async (req, res) => { /* ... */ })
-
-// DELETE /api/products/:id
-router.delete('/:id', async (req, res) => { /* ... */ })
 
 module.exports = router
