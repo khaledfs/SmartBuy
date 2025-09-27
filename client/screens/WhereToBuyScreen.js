@@ -44,14 +44,10 @@ const WhereToBuyScreen = ({ route, navigation }) => {
 
   useEffect(() => {
     return () => {
-      console.log('WhereToBuyScreen unmounted!');
     };
   }, []);
 
-  // Helper to get product details from barcode from the selected products only
-  const getProductByBarcode = (barcode) => {
-    return products.find(p => p.barcode === barcode);
-  };
+
 
   const handleUseGPS = async () => {
     setError('');
@@ -69,13 +65,11 @@ const WhereToBuyScreen = ({ route, navigation }) => {
       }
 
       const loc = await Location.getCurrentPositionAsync({});
-      console.log('[GPS] Coordinates:', loc.coords);
 
       const geocode = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
-      console.log('[GPS] Reverse geocode raw:', geocode);
 
       const g = geocode?.[0] || {};
       // Try a few plausible fields iOS/Android may populate
@@ -88,7 +82,6 @@ const WhereToBuyScreen = ({ route, navigation }) => {
         g.name ||
         null;
 
-      console.log('[GPS] Picked city field:', cityName);
 
       if (!cityName) {
         setError('Could not determine your city from GPS.');
@@ -97,7 +90,6 @@ const WhereToBuyScreen = ({ route, navigation }) => {
       }
 
       const hebCity = toHebrewCity(cityName) || cityName; // fallback to original if not mapped
-      console.log('[GPS] Mapped city to Hebrew:', hebCity, '(from:', cityName, ')');
 
       setCity(hebCity);
       await fetchStores({ city: hebCity });
@@ -132,7 +124,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
     setStores([]);
     try {
       // Replace with your actual backend endpoint
-      const response = await fetch('http://172.20.10.14:5000/api/compare/price', {
+      const response = await fetch('http://10.0.0.7:5000/api/compare/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -167,7 +159,7 @@ const WhereToBuyScreen = ({ route, navigation }) => {
         const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
 
         console.log('Products to mark as bought:', boughtProducts.map(p => p.name));
-        console.log('Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
+        console.log('Products that will be kept in list:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
 
         // Get the scraped product details (including images) from the store data
         const boughtProductsWithDetails = boughtProducts.map(p => {
@@ -192,12 +184,10 @@ const WhereToBuyScreen = ({ route, navigation }) => {
           },
           boughtProducts: boughtProductsWithDetails
         });
-        console.log('Setting showCelebration to true');
         setShowCelebration(true);
         setTimeout(() => {
-          console.log('Timeout done, hiding celebration and navigating to GroupSharedList');
           setShowCelebration(false);
-          navigation.navigate('GroupSharedList', { groupId });
+          navigation.pop(1);
         }, 3000);
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
