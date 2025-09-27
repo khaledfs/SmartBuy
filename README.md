@@ -116,8 +116,7 @@ SmartBuy/
 - The app uses MongoDB Atlas for data storage
 - Real-time updates are handled with Socket.io
 - Authentication uses JWT tokens stored in AsyncStorage
-- Product data is loaded from a local JSON file
-- The app supports both English and Hebrew interfaces
+
 
 ## Troubleshooting
 - **Connection Issues**: Ensure both devices are on the same WiFi network
