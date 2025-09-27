@@ -8,11 +8,11 @@ const weightsSchema = new mongoose.Schema({
     enum: [
       'bias',
       'isFavorite',
-      'purchasedBefore',
-      'timesPurchased',
-      'recentlyPurchased',
-      'timesRejected',
-      'purchaseFrequency'
+      'addedBefore',
+      'recentlyadded',
+      'timesAdded',
+      'AddedFrequency',
+      'timesRejected'
     ]
   },
   weight: {
