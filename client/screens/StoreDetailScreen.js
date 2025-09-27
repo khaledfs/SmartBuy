@@ -1,12 +1,16 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, Alert, Linking, Platform, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import PersonalListContext from '../services/PersonalListContext';
 
 const StoreDetailScreen = ({ route, navigation }) => {
-  const { store, products, tripType, groupId, currentUserId, groupCreatorId } = route.params || {};
+  const { store, products, tripType, groupId } = route.params || {};
   const { completeTrip } = React.useContext(PersonalListContext);
+
+
+// State for navigation sheet
+  const [navSheetVisible, setNavSheetVisible] = React.useState(false);
 
   // Helper to get product details from barcode
   const getProductByBarcode = (barcode) => {
@@ -31,21 +35,43 @@ const StoreDetailScreen = ({ route, navigation }) => {
 
   // All products should now have prices (real or estimated)
   const allProducts = products;
-
+  const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
   // Use the backend-calculated totals and counts
   const realPriceCount = store.realPriceCount || Object.keys(realPrices).length;
-  const estimatedPriceCount = store.estimatedPriceCount || Object.keys(estimatedPrices).length;
   const realPriceTotal = store.realPriceTotal || Object.values(realPrices).reduce((sum, price) => sum + price, 0);
-  const estimatedPriceTotal = store.estimatedPriceTotal || Object.values(estimatedPrices).reduce((sum, price) => sum + price, 0);
   const totalPrice = store.totalPrice || realPriceTotal; // Only real prices for total
+
+//  Navigation functions
+  const openInAppleMaps = async (address) => {
+    const enc = encodeURIComponent(address);
+    const url = `http://maps.apple.com/?daddr=${enc}&dirflg=d`;
+    await Linking.openURL(url);
+  };
+
+  const openInGoogleMaps = async (address) => {
+    const enc = encodeURIComponent(address);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${enc}&travelmode=driving`;
+    await Linking.openURL(url);
+  };
+
+  const openInWaze = async (address) => {
+    const enc = encodeURIComponent(address);
+    const scheme = `waze://?q=${enc}&navigate=yes`;
+    const fallback = `https://waze.com/ul?q=${enc}&navigate=yes`;
+    const can = await Linking.canOpenURL(scheme);
+    await Linking.openURL(can ? scheme : fallback);
+  };
+
+  const onPressNavigate = () => setNavSheetVisible(true);
+
 
   const handleBuy = async () => {
     console.log('Buy button pressed', { tripType, store });
 
     if (tripType === 'group' && groupId) {
       try {
-        // 1) Build itemPrices as { [barcode]: number }
-        //   Prefer store.itemPrices if already present; otherwise derive from store.productDetails / foundProducts
         const itemPrices =
           (store.itemPrices && typeof store.itemPrices === 'object')
             ? Object.entries(store.itemPrices).reduce((acc, [bc, price]) => {
@@ -61,16 +87,13 @@ const StoreDetailScreen = ({ route, navigation }) => {
               }, {})
               : {});
 
-        // 2) Positive-price barcodes
         const positiveBarcodes = Object.entries(itemPrices)
           .filter(([_, price]) => parseFloat(price) > 0)
           .map(([bc]) => bc);
 
-        // 3) Fallback: merge with foundBarcodes if present
         const foundBarcodes = Array.isArray(store.foundBarcodes) ? store.foundBarcodes : [];
         const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
 
-        // 4) Map products -> boughtProducts with details
         const boughtProducts = products
           .filter(p => barcodesBought.includes(p.barcode))
           .map(p => {
@@ -86,7 +109,6 @@ const StoreDetailScreen = ({ route, navigation }) => {
             };
           });
 
-        // 5) Send the SAME shape the server expects
         await api.post(`/groups/${groupId}/list/complete-trip`, {
           store: {
             branch: store.branch || store.storeName,
@@ -97,7 +119,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
           boughtProducts,
         });
 
-        navigation.replace('GroupSharedList', { groupId });
+        navigation.pop(2);
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
       }
@@ -120,7 +142,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
           totalPrice: store.totalPrice ?? store.price ?? null,
         }, boughtProducts);
 
-        navigation.replace('TransitionScreenPersonal');
+        navigation.replace('beforeShopping');
       } catch (err) {
         console.log('Error in personal trip buy logic:', err);
         Alert.alert('Error', 'Failed to complete personal trip');
@@ -130,9 +152,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
     }
   };
 
-
   const renderItemCard = (product, index) => {
-    // Get the actual product image and details from store data if available
     const productDetails = store.productDetails?.[product.barcode];
     const displayName = productDetails?.name || product.name;
     const displayImage = productDetails?.img || product.image || product.img || product.icon;
@@ -152,7 +172,7 @@ const StoreDetailScreen = ({ route, navigation }) => {
           <View style={styles.priceContainer}>
             <Text style={[
               styles.itemPrice,
-              isEstimated && { color: '#ff9800', fontWeight: 'bold' } // Orange for estimated prices
+              isEstimated && { color: '#ff9800', fontWeight: 'bold' }
             ]}>
               {displayPrice === '--' ? displayPrice : `₪${displayPrice}`}
             </Text>
@@ -180,19 +200,24 @@ const StoreDetailScreen = ({ route, navigation }) => {
           <View style={styles.storeDetails}>
             <Text style={styles.storeName}>{store.branch}</Text>
             <Text style={styles.storeAddress}>{store.address}</Text>
-            <Text style={styles.storeTotal}>מחיר : ₪{store.totalPrice || 'N/A'}</Text>
+            <Text style={styles.storeTotal}>מחיר : ₪{store.totalPrice.toFixed(2) || 'N/A'}</Text>
             {store.distance !== null && store.distance !== undefined && (
               <Text style={styles.storeDistance}>מרחק: {store.distance} ק"מ</Text>
             )}
           </View>
         </View>
+
+        {/* Navigation Button */}
+        <TouchableOpacity style={styles.navButton} onPress={onPressNavigate}>
+          <Ionicons name="navigate" size={18} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {/* All Products Card */}
       <View style={styles.itemsCard}>
-        <Text style={styles.cardTitle}>כל המוצרים</Text>
+        <Text style={styles.cardTitle}>המוצרים שנמצאו</Text>
         <Text style={styles.itemsCount}>
-          {allProducts.length} מוצרים
+          {positiveBarcodes.length} מוצרים
         </Text>
         {allProducts.length > 0 ? (
           <>
@@ -201,7 +226,6 @@ const StoreDetailScreen = ({ route, navigation }) => {
             </ScrollView>
             <View style={styles.totalSection}>
               <Text style={styles.totalText}>סה"כ : ₪{totalPrice.toFixed(2)}</Text>
-
             </View>
           </>
         ) : (
@@ -215,6 +239,59 @@ const StoreDetailScreen = ({ route, navigation }) => {
           <Text style={styles.buyButtonText}>Buy from this Store</Text>
         </TouchableOpacity>
       ) : null}
+
+      {/* Navigation Options Modal */}
+      <Modal
+        visible={navSheetVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setNavSheetVisible(false)}
+      >
+        <View style={styles.navSheetOverlay}>
+          <View style={styles.navSheet}>
+            <Text style={styles.navSheetTitle}>Choose application</Text>
+
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                style={styles.navOption}
+                onPress={async () => {
+                  setNavSheetVisible(false);
+                  try { await openInAppleMaps(store.address); } catch { }
+                }}
+              >
+                <Text style={styles.navOptionText}>Maps</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.navOption}
+              onPress={async () => {
+                setNavSheetVisible(false);
+                try { await openInGoogleMaps(store.address); } catch { }
+              }}
+            >
+              <Text style={styles.navOptionText}>Google Maps</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navOption}
+              onPress={async () => {
+                setNavSheetVisible(false);
+                try { await openInWaze(store.address); } catch { }
+              }}
+            >
+              <Text style={styles.navOptionText}>Waze</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navCancel}
+              onPress={() => setNavSheetVisible(false)}
+            >
+              <Ionicons name="close" size={18} color="#444" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -234,6 +311,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    position: 'relative',
   },
   storeHeader: {
     flexDirection: 'row',
@@ -272,6 +350,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
   },
+
+  navButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#1976D2',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+
   itemsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -305,9 +398,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   estimatedItemCard: {
-    backgroundColor: '#fff8e1', // Light orange background for estimated items
+    backgroundColor: '#fff8e1',
     borderWidth: 1,
-    borderColor: '#ffb74d', // Orange border
+    borderColor: '#ffb74d',
   },
   itemImage: {
     width: 50,
@@ -315,9 +408,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginRight: 12,
   },
-  estimatedImage: {
-    opacity: 0.8, // Slightly dimmed for estimated items
-  },
+  estimatedImage: { opacity: 0.8 },
   itemInfo: {
     flex: 1,
     flexDirection: 'row',
@@ -331,61 +422,19 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
-  priceContainer: {
-    alignItems: 'flex-end',
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976D2',
-  },
-  estimatedText: {
-    color: '#ff9800', // Orange text for estimated items
-  },
-  estimatedLabel: {
-    fontSize: 10,
-    color: '#ff9800',
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
+  priceContainer: { alignItems: 'flex-end' },
+  itemPrice: { fontSize: 14, fontWeight: '600', color: '#1976D2' },
+  estimatedText: { color: '#ff9800' },
+  estimatedLabel: { fontSize: 10, color: '#ff9800', fontStyle: 'italic', marginTop: 2 },
   totalSection: {
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
     paddingTop: 12,
     marginTop: 8,
   },
-  totalText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    textAlign: 'right',
-  },
-  realTotalText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    textAlign: 'right',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  estimatedTotalText: {
-    fontSize: 12,
-    color: '#ff9800',
-    textAlign: 'right',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  noItemsText: {
-    fontSize: 14,
-    color: '#b71c1c',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  allFoundText: {
-    fontSize: 14,
-    color: '#388e3c',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
+  totalText: { fontSize: 16, fontWeight: 'bold', color: '#1976D2', textAlign: 'right' },
+  noItemsText: { fontSize: 14, color: '#b71c1c', textAlign: 'center', fontStyle: 'italic' },
+
   buyButton: {
     backgroundColor: '#1976D2',
     borderRadius: 8,
@@ -394,11 +443,39 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 20,
   },
-  buyButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+  buyButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+
+  // ↙️ סגנונות לחלונית הבחירה
+  navSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+  navSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  navSheetTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  navOption: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e6e6e6',
+  },
+  navOptionText: { fontSize: 16, color: '#222' },
+  navCancel: {
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 6,
+    padding: 8,
   },
 });
 
-export default StoreDetailScreen; 
+export default StoreDetailScreen;
