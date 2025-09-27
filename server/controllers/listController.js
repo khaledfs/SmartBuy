@@ -56,18 +56,15 @@ const emitListUpdate = (req, list, action = 'itemUpdated', itemName = null, item
   // Emit to both group room and list room for comprehensive coverage
   if (groupId) {
     io.to(groupId).emit('listUpdate', updateData);
-    console.log(`📢 Emitted to group room: ${groupId} - Action: ${action}, Item: ${itemName || 'N/A'}`);
   }
 
   if (listId) {
     io.to(listId).emit('listUpdate', updateData);
-    console.log(`📢 Emitted to list room: ${listId} - Action: ${action}, Item: ${itemName || 'N/A'}`);
   }
 
   // Also emit to owner's room if it's a personal list
   if (!groupId && list.owner) {
     io.to(list.owner.toString()).emit('listUpdate', updateData);
-    console.log(`📢 Emitted to owner room: ${list.owner} - Action: ${action}, Item: ${itemName || 'N/A'}`);
   }
 };
 
@@ -134,18 +131,8 @@ exports.updateList = async (req, res) => {
   }
 };
 
-// DELETE /lists/:id
-exports.deleteList = async (req, res) => {
-  try {
-    const list = await authorizeListAccess(req.params.id, req.userId);
-    if (!list) return res.status(403).json({ message: 'Access denied' });
 
-    await List.findByIdAndDelete(req.params.id);
-    res.json({ message: 'List deleted' });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-};
+
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -153,7 +140,8 @@ async function recordAddAndUpdateGap({
   barcode,            // string (preferred, but will be fetched if missing)
   groupId,            // ObjectId|string (required)
   productId = null,   // ObjectId|string (preferred)
-  productname = ''    // string (optional)
+  productname = '',    // string (optional)
+  quantity = 1        // number (optional, default 1)
 }) {
   console.log('recordAddAndUpdateGap called with:', { barcode, groupId, productId, productname });
   if (!groupId) throw new Error('groupId is required');
@@ -193,7 +181,7 @@ async function recordAddAndUpdateGap({
         group: groupId,
         addedgap: 0,
         gapCount: 0,
-        totaladded: 1,
+        totaladded: quantity,
         lastAdded: now,
         createdAt: now
       });
@@ -209,7 +197,7 @@ async function recordAddAndUpdateGap({
     }
   }
 
-  const updates = { $inc: { totaladded: 1 }, $set: { lastAdded: now } };
+  const updates = { $inc: { totaladded: quantity}, $set: { lastAdded: now } };
 
   if (String(doc.product) !== String(productId)) updates.$set.product = productId;
   if (barcode && doc.productbarcode !== barcode) updates.$set.productbarcode = barcode;
@@ -229,46 +217,41 @@ async function recordAddAndUpdateGap({
 }
 exports.addItemToList = async (req, res) => {
   try {
-    const { name, quantity = 1, productId, icon, barcode } = req.body;
-    console.log('koko Adding item to list:', { name, quantity, productId, icon, barcode });
-    const listId = req.params.id;
+    const { id } = req.params; // listId
+    const { name, productId, barcode, icon } = req.body;
+    const List = require('../models/List');
+    const Item = require('../models/Item');
 
-    const list = await authorizeListAccess(listId, req.userId);
-    if (!list) {
-      console.log('Access denied to list');
-      return res.status(403).json({ message: 'Access denied' });
+    const list = await List.findById(id).populate('items');
+    if (!list) return res.status(404).json({ message: 'List not found' });
+
+    // Check for existing item by productId or name
+    let existing = list.items.find(
+      i => (i.productId && productId && i.productId.toString() === productId.toString()) ||
+        (i.name && name && i.name.toLowerCase() === name.toLowerCase())
+    );
+    if (existing) {
+      console.log('Item already in list, incrementing quantity');
+      existing.quantity = (existing.quantity || 1) + 1;
+      await existing.save();
+
+      return res.json(existing);
     }
 
+    // If not found, create new item
     const item = new Item({
       name,
-      quantity,
-      product: productId || null,
-      list: listId,
-      icon: icon || null,
-      barcode: barcode || '',
-      addedBy: req.userId
+      productId,
+      barcode,
+      icon,
+      quantity: 1,
+      addedBy: req.userId,
     });
-
     await item.save();
+
     list.items.push(item._id);
     await list.save();
-    await item.populate('product');
-
-    console.log('Item added to list and saved');
-
-    try {
-      await ProductHistory.create({
-        userId: req.userId,
-        productId: productId,
-        action: 'added',
-        createdAt: new Date()
-      });
-    } catch (phErr) {
-      console.error('Failed to log ProductHistory:', phErr);
-    }
-
     let mlWarning = null;
-
     if (productId) {
       try {
         const features = await extractFeaturesForProduct(productId, req.userId, list.group._id);
@@ -299,88 +282,12 @@ exports.addItemToList = async (req, res) => {
     await recordAddAndUpdateGap({ barcode, groupId: list.group._id, productId, productname: name }).catch(err => {
       console.log('RecordAddAndUpdateGap error:', err.message);
     })
-
-    res.status(201).json({ item, mlWarning });
+    res.status(201).json(item);
   } catch (err) {
-    console.error('❌ Failed to add item to list:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.stack });
   }
 };
 
-// POST /lists/:id/items/:productId
-exports.addItemToListById = async (req, res) => {
-  try {
-    const { quantity = 1 } = req.body;
-    const { id: listId, productId } = req.params;
-
-    const list = await authorizeListAccess(listId, req.userId);
-    if (!list) {
-      console.log('Access denied to list');
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    const item = new Item({
-      name: req.body.name || 'Product',
-      quantity,
-      product: productId,
-      list: listId
-    });
-
-    await item.save();
-    list.items.push(item._id);
-    await list.save();
-    await item.populate('product');
-
-    console.log('Item added to list by ID and saved');
-
-    // Log to ProductHistory for ML
-    try {
-      await ProductHistory.create({
-        userId: req.userId,
-        productId: productId,
-        action: 'added',
-        createdAt: new Date()
-      });
-    } catch (phErr) {
-      console.error('Failed to log ProductHistory:', phErr);
-    }
-
-    let mlWarning = null;
-    if (productId) {
-      try {
-        const features = await extractFeaturesForProduct(productId, req.userId, list.group);
-        const featuresArray = [
-          1,
-          features.isFavorite || 0,
-          features.purchasedBefore || 0,
-          features.timesPurchased || 0,
-          features.recentlyPurchased || 0,
-          features.timesWasRejectedByUser || 0,
-          features.timesWasRejectedByGroup || 0,
-          features.groupPopularity || 0,
-          features.priceScore || 0,
-          features.categoryPopularity || 0
-        ];
-
-        await TrainingExample.create({
-          userId: req.userId,
-          productId: productId,
-          features: featuresArray,
-          label: 1 // 1 = accepted/added
-        });
-      } catch (mlError) {
-        console.error('ML training error:', mlError);
-        mlWarning = 'ML training failed: ' + mlError.message;
-      }
-    }
-
-    emitListUpdate(req, list, 'itemAdded', item.name, item._id);
-    res.status(201).json({ item, mlWarning });
-  } catch (err) {
-    console.error('❌ Failed to add item to list by ID:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
 
 // DELETE /lists/:id/items/:itemId
 exports.deleteItemById = async (req, res) => {
@@ -470,5 +377,69 @@ exports.markItemAsBought = async (req, res) => {
   } catch (err) {
     console.error('❌ Failed to mark item as bought:', err);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// PUT /lists/:id/items/:itemId/qty
+exports.updateItemQty = async (req, res) => {
+  try {
+    const { id, itemId } = req.params;
+    const { quantity, name, productId, barcode, icon } = req.body;
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ message: 'Quantity must be at least 1' });
+    }
+
+    const List = require('../models/List');
+    const Item = require('../models/Item');
+
+    const list = await List.findById(id).populate('items');
+    if (!list) return res.status(404).json({ message: 'List not found' });
+
+
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ message: 'Item not found' });
+    let oldQty = item.quantity || 1;
+    item.quantity = quantity;
+    let itemChanged = quantity - oldQty;
+    console.log('Item quantity change:', oldQty, '->', quantity, ' (change:', itemChanged, ')');
+    await item.save();
+    let mlWarning = null;
+    if (itemChanged > 0) {
+      if (productId) {
+
+        try {
+          const features = await extractFeaturesForProduct(productId, req.userId, list.group._id);
+
+          const featuresArray = {
+            bias: 1,
+            isFavorite: features.isFavorite || 0,
+            addedBefore: features.addedBefore || 0,
+            timesAdded: features.timesAdded || 0,
+            recentlyadded: features.recentlyadded || 0,
+            AddedFrequency: features.AddedFrequency || 0,
+            timesRejected: features.timesRejected || 0,
+          };
+          console.log('Extracted features for ML:', featuresArray);
+          await TrainingExample.create({
+            userId: req.userId,
+            productId: productId,
+            features: featuresArray,
+            label: 1
+          });
+        } catch (mlError) {
+          console.error('ML training error:', mlError);
+          mlWarning = 'ML training failed: ' + mlError.message;
+        }
+      }
+      await recordAddAndUpdateGap({ barcode, groupId: list.group._id, productId, productname: name, quantity: itemChanged }).catch(err => {
+        console.log('RecordAddAndUpdateGap error:', err.message);
+      })
+    }
+    emitListUpdate(req, list, 'itemAdded', item.name, item._id);
+
+  
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.stack });
   }
 };
