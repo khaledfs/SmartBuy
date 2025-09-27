@@ -10,15 +10,16 @@ function predictProbability(X, weights) {
   return sigmoid(z);
 }
 
+// Train logistic regression using gradient descent 
 function trainLogisticRegression(data, labels, learningRate = 0.01, iterations = 1000) {
   const numSamples = data.length;
   const numFeatures = data[0].length;
 
   let weights = new Array(numFeatures).fill(0);
-
+  // Gradient descent loop
   for (let k = 0; k < iterations; k++) {
     const gradients = new Array(numFeatures).fill(0);
-
+    // Compute predictions and gradients
     for (let i = 0; i < numSamples; i++) {
       const prediction = predictProbability(data[i], weights);
       const error = prediction - labels[i];
@@ -63,10 +64,13 @@ async function trainModel() {
     // Shuffle examples
     const shuffled = validExamples.sort(() => Math.random() - 0.5);
     const splitIdx = Math.floor(shuffled.length * 0.8); // 80% train, 20% test
-    const trainSet = shuffled.slice(0, splitIdx);
-    const testSet = shuffled.slice(splitIdx);
+    const trainSet = shuffled.slice(0, splitIdx); // 80% train
+    const testSet = shuffled.slice(splitIdx); // 20% test
+
+    // Prepare feature matrices and label vectors
+    // Features: [bias, isFavorite, addedBefore, recentlyadded, timesAdded, AddedFrequency, timesRejected]
+    // Ensure all features are present and default to 0 if missing
     const X_train = trainSet.map(e => {
-      console.log(e);
       // Ensure features object exists and has all required properties
       const features = e.features || {};
       return [
@@ -79,6 +83,7 @@ async function trainModel() {
         features.timesRejected || 0,
       ];
     });
+    // Labels
     const y_train = trainSet.map(e => e.label || 0);
 
     const X_test = testSet.map(e => {
@@ -148,11 +153,11 @@ async function initializeDefaultWeights() {
   const defaultWeights = {
     bias: 0,
     isFavorite: 0.5,
-    purchasedBefore: 0.3,
-    timesPurchased: 0.2,
-    recentlyPurchased: 0.4,
+    addedBefore: 0.3,
+    timesAdded: 0.4,
+    recentlyadded: 0.2,
     timesRejected: -0.3,
-    purchaseFrequency: 0.1
+    AddedFrequency: 0.1
   };
 
   await Promise.all(
@@ -195,15 +200,18 @@ async function updateWeights(x, y, learningRate = 0.01) {
     throw error;
   }
 }
-
 async function rankProducts(productFeatureMap) {
   try {
     const weights = await Weights.find().lean();
 
     if (weights.length === 0) {
       console.log('No weights found. Using default ranking.');
-      return Array.from(productFeatureMap.entries()).map(([productId, data]) => ({
-        productId,
+      return Array.from(productFeatureMap.values()).map(item => ({
+        productId: item.productId,
+        name: item.name,
+        barcode: item.barcode,
+        img: item.img,
+        type: item.type,
         probability: 0.5
       }));
     }
@@ -212,19 +220,22 @@ async function rankProducts(productFeatureMap) {
     const w = weights.map(wi => wi.weight);
 
     const ranked = [];
-
     for (const [productId, data] of productFeatureMap.entries()) {
       const featureVector = [1]; // bias
       for (const featureName of featureNames.slice(1)) {
         featureVector.push(data[featureName] ?? 0);
       }
-
-      // Predict purchase probability
+      
       const prob = predictProbability(featureVector, w);
-      ranked.push({ productId, probability: prob });
+      ranked.push({
+        productId,
+        name: data.name,
+        barcode: data.barcode,
+        img: data.img,
+        type: data.type,
+        probability: prob
+      });
     }
-
-    // Sort by probability (highest first)
     ranked.sort((a, b) => b.probability - a.probability);
     return ranked;
   } catch (error) {
