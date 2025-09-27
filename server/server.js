@@ -39,8 +39,6 @@ app.use(express.json({ limit: '1mb' }));
 // API routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
-app.use('/api/supermarkets', require('./routes/supermarketRoutes'));
-app.use('/api/offers', require('./routes/offerRoutes'));
 app.use('/api/list', require('./routes/listRoutes'));
 app.use('/api/lists', require('./routes/listRoutes'));
 app.use('/api/suggestions', require('./routes/suggestionRoutes'));
@@ -70,10 +68,7 @@ app.get('/api/groups/my', (req, res) => {
 
 // Connect to MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://Khalid211:khalidkind211@cluster0.r7gzuda.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0';
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-for-smart-buy-app-2024';
 
-// Set JWT_SECRET globally so authController can access it
-process.env.JWT_SECRET = JWT_SECRET;
 
 mongoose
   .connect(MONGO_URI)
@@ -287,7 +282,6 @@ server.listen(PORT, () => {
   console.log(`🔗 Local: http://localhost:${PORT}`);
 
   console.log(`🌐 Network: http://${NETWORK_IP}:${PORT}`);
-  console.log('📱 QR Code will appear below for mobile testing');
   console.log('─'.repeat(50));
 
   // Initialize ML model after server starts
