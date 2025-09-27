@@ -111,6 +111,26 @@ export default function GroupSharedListScreen({ route, navigation }) {
     });
   };
 
+const updateItemQty = async (item,itemId, newQty) => {
+  try {
+    await api.patch(`/groups/${groupId}/list/items/${itemId}`, { quantity: newQty, 
+          icon: item.img,
+          productId: itemId || item._id,
+          barcode: item.barcode || '', });
+    fetchSummary();
+  } catch (err) {
+    Alert.alert('Error', 'Failed to update quantity');
+  }
+};
+
+const increaseQty = (item) =>
+  updateItemQty(item ,item._id || item.id || item.productId, (item.quantity || 1) + 1);
+
+const decreaseQty = (item) => {
+  if ((item.quantity || 1) === 1) return; // Do nothing if quantity is 1
+  updateItemQty(item._id || item.id || item.productId, (item.quantity || 1) - 1);
+};
+
   const removeItem = async (item) => {
     if (deletedMessages.some(m => m.id === (item._id || item.id || item.productId))) return;
     try {
@@ -166,20 +186,54 @@ export default function GroupSharedListScreen({ route, navigation }) {
     const imageSrc = item.img || item.icon;
     return (
       <Swipeable renderRightActions={() => renderRightActions(item)}>
-        <View style={styles.rowCard}>
-          <Image
-            source={imageSrc && typeof imageSrc === 'string' && (imageSrc.startsWith('http') || imageSrc.startsWith('data:image/'))
-              ? { uri: imageSrc }
-              : { uri: PLACEHOLDER_IMAGE }}
-            style={styles.rowImage}
-            resizeMode="cover"
-          />
-          <View style={styles.rowContent}>
-            <Text style={styles.rowProductName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.rowMeta} numberOfLines={1}>{displayText}{displayTime ? ` at ${displayTime}` : ''}</Text>
-          </View>
-        </View>
-      </Swipeable>
+  <View style={styles.rowCard}>
+    <Image
+      source={
+        imageSrc && typeof imageSrc === 'string' &&
+        (imageSrc.startsWith('http') || imageSrc.startsWith('data:image/'))
+          ? { uri: imageSrc }
+          : { uri: PLACEHOLDER_IMAGE }
+      }
+      style={styles.rowImage}
+      resizeMode="cover"
+    />
+
+    <View style={styles.rowContent}>
+      <Text style={styles.rowProductName} numberOfLines={1}>{item.name}</Text>
+      <Text style={styles.rowMeta} numberOfLines={1}>
+        {displayText}{displayTime ? ` at ${displayTime}` : ''}
+      </Text>
+
+      {/* qty selector or just quantity */}
+      <View style={styles.qtyRow}>
+        {isPurchaseHistory ? (
+          <Text style={styles.qtyText}>x{item.quantity || 1}</Text>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={styles.qtyButton}
+              onPress={() => decreaseQty(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="remove" size={20} color="#2E7D32" />
+            </TouchableOpacity>
+
+            <Text style={styles.qtyText}>x{item.quantity || 1}</Text>
+
+            <TouchableOpacity
+              style={styles.qtyButton}
+              onPress={() => increaseQty(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="add" size={20} color="#2E7D32" />
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </View>
+  </View>
+</Swipeable>
+
     );
   };
 
@@ -572,4 +626,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-}); 
+  qtyRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 10,           // if RN <0.71, replace with marginHorizontal on children
+  marginTop: 6,
+},
+qtyButton: {
+  width: 28,
+  height: 28,
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: '#2E7D32',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#fff',
+},
+qtyText: {
+  fontSize: 16,
+  fontWeight: '600',
+  minWidth: 28,
+  textAlign: 'center',
+},
+
+});
