@@ -1,28 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, SafeAreaView, Alert, FlatList, Share } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList, Share } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import { useFocusEffect } from '@react-navigation/native';
 import { registerGroupNotifications } from '../services/socketEvents';
 import Toast from 'react-native-toast-message';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-const demoGroups = [
-  {
-    id: 'group1',
-    name: 'Roommates',
-    members: [{ name: 'Alice' }, { name: 'Bob' }, { name: 'Charlie' }],
-    lastActivity: '2h ago',
-  },
-  {
-    id: 'group2',
-    name: 'Family',
-    members: [{ name: 'Mom' }, { name: 'Dad' }, { name: 'You' }, { name: 'Sis' }],
-    lastActivity: 'Yesterday',
-  },
-];
 
-export default function GroupListScreen({ navigation }) {
+
+export default function GroupsScreen({ navigation }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [groups, setGroups] = useState([]); // Start empty, fetch from backend
   const [groupName, setGroupName] = useState('');
@@ -185,6 +173,7 @@ export default function GroupListScreen({ navigation }) {
         ) : (
           <>
             {sortedGroups.map((group, idx) => {
+              // Highlight new groups created within last 24 hours
               const isNewGroup = new Date(group.createdAt || 0) > new Date(Date.now() - 24 * 60 * 60 * 1000);
               
               return (
@@ -244,7 +233,7 @@ export default function GroupListScreen({ navigation }) {
               style={styles.input}
               autoFocus
             />
-            <View style={styles.addMembersSection}>
+            {/* <View style={styles.addMembersSection}>
               <Text style={styles.addMembersLabel}>Add members by username/phone/email:</Text>
               <View style={styles.addMembersRow}>
                 <TextInput
@@ -274,7 +263,7 @@ export default function GroupListScreen({ navigation }) {
                 style={{ marginTop: 10 }}
                 ListEmptyComponent={null}
               />
-            </View>
+            </View>*/}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateModal(false)} disabled={creating}>
                 <Text style={styles.cancelText}>Cancel</Text>

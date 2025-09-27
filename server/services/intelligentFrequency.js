@@ -367,4 +367,4 @@ class IntelligentFrequencyService {
   }
 }
 
-module.exports = IntelligentFrequencyService; 
+module.exports = IntelligentFrequencyService;  

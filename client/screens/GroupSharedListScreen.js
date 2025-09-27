@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator, StyleSheet, SafeAreaView, Alert, Animated } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator, StyleSheet, Alert, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import productsData from '../assets/products.json';
@@ -7,6 +7,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { registerListUpdates, joinRoom } from '../services/socketEvents';
 import { useIsFocused } from '@react-navigation/native';
 import { formatPrice } from '../utils/priceFormatter';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 const DELETE_MSG_DURATION = 4000;
@@ -30,18 +31,18 @@ export default function GroupSharedListScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!groupId) return;
-    
+
     console.log('👥 Joining group room:', groupId);
     joinRoom(groupId);
-    
+
     fetchSummary();
-    
+
     const unsubscribe = registerListUpdates((data) => {
       console.log('📢 List update received in GroupSharedListScreen:', data);
       console.log('🔄 Refreshing group list...');
       fetchSummary();
     });
-    
+
     return () => {
       console.log('👥 Leaving group room:', groupId);
       unsubscribe && unsubscribe();
@@ -91,6 +92,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
   };
 
   const handleCompare = () => {
+    console.log(summary.currentList);
     const products = summary.currentList
       .filter(item => item && item.name) // Only filter for valid items with names
       .map(item => ({
@@ -99,15 +101,35 @@ export default function GroupSharedListScreen({ route, navigation }) {
         quantity: item.quantity || 1,
         image: item.img || item.icon // Add the image field
       }));
-    
+
     console.log(`🛒 Compare: ${products.length} products for group ${groupId}`);
-    
+
     navigation.navigate('WhereToBuy', {
       products,
       tripType: 'group',
       groupId,
     });
   };
+
+const updateItemQty = async (item,itemId, newQty) => {
+  try {
+    await api.patch(`/groups/${groupId}/list/items/${itemId}`, { quantity: newQty, 
+          icon: item.img,
+          productId: itemId || item._id,
+          barcode: item.barcode || '', });
+    fetchSummary();
+  } catch (err) {
+    Alert.alert('Error', 'Failed to update quantity');
+  }
+};
+
+const increaseQty = (item) =>
+  updateItemQty(item ,item._id || item.id || item.productId, (item.quantity || 1) + 1);
+
+const decreaseQty = (item) => {
+  if ((item.quantity || 1) === 1) return; // Do nothing if quantity is 1
+  updateItemQty(item._id || item.id || item.productId, (item.quantity || 1) - 1);
+};
 
   const removeItem = async (item) => {
     if (deletedMessages.some(m => m.id === (item._id || item.id || item.productId))) return;
@@ -144,11 +166,11 @@ export default function GroupSharedListScreen({ route, navigation }) {
     // For purchase history (lastBought), show who purchased it
     // For current list, show who added it
     const isPurchaseHistory = activeTab === 'lastBought' || selectedTrip;
-    
+
     let displayName = 'Unknown';
     let displayText = '';
     let displayTime = '';
-    
+
     if (isPurchaseHistory) {
       // Purchase history - show who purchased
       displayName = item.user && (item.user.username || item.user.name) ? (item.user.username || item.user.name) : 'Unknown';
@@ -160,24 +182,58 @@ export default function GroupSharedListScreen({ route, navigation }) {
       displayText = `Added by ${displayName}`;
       displayTime = item.createdAt ? new Date(item.createdAt).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '';
     }
-    
+
     const imageSrc = item.img || item.icon;
     return (
       <Swipeable renderRightActions={() => renderRightActions(item)}>
-        <View style={styles.rowCard}>
-          <Image
-            source={imageSrc && typeof imageSrc === 'string' && (imageSrc.startsWith('http') || imageSrc.startsWith('data:image/'))
-              ? { uri: imageSrc }
-              : { uri: PLACEHOLDER_IMAGE }}
-            style={styles.rowImage}
-            resizeMode="cover"
-          />
-          <View style={styles.rowContent}>
-            <Text style={styles.rowProductName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.rowMeta} numberOfLines={1}>{displayText}{displayTime ? ` at ${displayTime}` : ''}</Text>
-          </View>
-        </View>
-      </Swipeable>
+  <View style={styles.rowCard}>
+    <Image
+      source={
+        imageSrc && typeof imageSrc === 'string' &&
+        (imageSrc.startsWith('http') || imageSrc.startsWith('data:image/'))
+          ? { uri: imageSrc }
+          : { uri: PLACEHOLDER_IMAGE }
+      }
+      style={styles.rowImage}
+      resizeMode="cover"
+    />
+
+    <View style={styles.rowContent}>
+      <Text style={styles.rowProductName} numberOfLines={1}>{item.name}</Text>
+      <Text style={styles.rowMeta} numberOfLines={1}>
+        {displayText}{displayTime ? ` at ${displayTime}` : ''}
+      </Text>
+
+      {/* qty selector or just quantity */}
+      <View style={styles.qtyRow}>
+        {isPurchaseHistory ? (
+          <Text style={styles.qtyText}>x{item.quantity || 1}</Text>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={styles.qtyButton}
+              onPress={() => decreaseQty(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="remove" size={20} color="#2E7D32" />
+            </TouchableOpacity>
+
+            <Text style={styles.qtyText}>x{item.quantity || 1}</Text>
+
+            <TouchableOpacity
+              style={styles.qtyButton}
+              onPress={() => increaseQty(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="add" size={20} color="#2E7D32" />
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </View>
+  </View>
+</Swipeable>
+
     );
   };
 
@@ -236,7 +292,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
             {activeTab === 'lastBought' && (
               <>
                 {!showTripHistory && !selectedTrip && (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.viewHistoryButton}
                     onPress={() => {
                       fetchTripHistory();
@@ -246,20 +302,20 @@ export default function GroupSharedListScreen({ route, navigation }) {
                     <Text style={styles.viewHistoryButtonText}>View Trip History</Text>
                   </TouchableOpacity>
                 )}
-                
+
                 {showTripHistory && (
                   <View style={styles.tripHistoryContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.backButton}
                       onPress={() => setShowTripHistory(false)}
                     >
                       <Text style={styles.backButtonText}>← Back to Current Trip</Text>
                     </TouchableOpacity>
-                    
+
                     <FlatList
                       data={tripHistory}
                       renderItem={({ item }) => (
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           style={styles.tripCard}
                           onPress={() => fetchTripItems(item._id)}
                         >
@@ -280,10 +336,10 @@ export default function GroupSharedListScreen({ route, navigation }) {
                     />
                   </View>
                 )}
-                
+
                 {selectedTrip && (
                   <View style={styles.tripHistoryContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.backButton}
                       onPress={() => {
                         setSelectedTrip(null);
@@ -292,14 +348,14 @@ export default function GroupSharedListScreen({ route, navigation }) {
                     >
                       <Text style={styles.backButtonText}>← Back to Trip History</Text>
                     </TouchableOpacity>
-                    
+
                     <View style={styles.tripInfo}>
                       <Text style={styles.tripTitle}>Trip {selectedTrip.trip.tripNumber}</Text>
                       <Text style={styles.tripDate}>
                         {new Date(selectedTrip.trip.completedAt).toLocaleDateString()}
                       </Text>
                     </View>
-                    
+
                     {lastStore && (
                       <View style={{ backgroundColor: '#E3F2FD', borderRadius: 10, padding: 12, marginBottom: 10 }}>
                         <Text style={{ color: '#1976D2', fontWeight: 'bold' }}>Store: {lastStore.branch}</Text>
@@ -307,7 +363,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
                         {lastStore.totalPrice && <Text style={{ color: '#1976D2' }}>Total Price: {formatPrice(lastStore.totalPrice)}</Text>}
                       </View>
                     )}
-                    
+
                     <FlatList
                       data={activeItems}
                       renderItem={renderItemCard}
@@ -317,7 +373,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
                     />
                   </View>
                 )}
-                
+
                 {!showTripHistory && !selectedTrip && lastStore && (
                   <View style={{ backgroundColor: '#E3F2FD', borderRadius: 10, padding: 12, marginBottom: 10 }}>
                     <Text style={{ color: '#1976D2', fontWeight: 'bold' }}>Store: {lastStore.branch}</Text>
@@ -325,7 +381,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
                     {lastStore.totalPrice && <Text style={{ color: '#1976D2' }}>Total Price: {formatPrice(lastStore.totalPrice)}</Text>}
                   </View>
                 )}
-                
+
                 {!showTripHistory && !selectedTrip && (
                   <FlatList
                     data={activeItems}
@@ -337,7 +393,7 @@ export default function GroupSharedListScreen({ route, navigation }) {
                 )}
               </>
             )}
-            
+
             {activeTab === 'current' && (
               <FlatList
                 data={activeItems}
@@ -570,4 +626,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-}); 
+  qtyRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 10,           // if RN <0.71, replace with marginHorizontal on children
+  marginTop: 6,
+},
+qtyButton: {
+  width: 28,
+  height: 28,
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: '#2E7D32',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#fff',
+},
+qtyText: {
+  fontSize: 16,
+  fontWeight: '600',
+  minWidth: 28,
+  textAlign: 'center',
+},
+
+});

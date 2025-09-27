@@ -3,16 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PersonalListContext = createContext();
 
-// מפתחות שמורים ב-AsyncStorage
 const KEYS = {
   PERSONAL_LIST: 'sb.personalList',
   LAST_BOUGHT: 'sb.lastBought',
   LAST_STORE: 'sb.lastStore',
   TRIP_HISTORY: 'sb.tripHistory',
-  SELECTED_TRIP_ID: 'sb.selectedTripId', // רק מזהה, לא את כל האובייקט
+  SELECTED_TRIP_ID: 'sb.selectedTripId', 
 };
 
-// עוזרים בטוחים ל-JSON
 const loadJSON = async (key, fallback) => {
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -25,28 +23,26 @@ const saveJSON = async (key, value) => {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // אפשר לשקול Toast/log
-  }
+
+    // Ignore write errors
+    }
 };
 
-// שכפול אייטמים כדי להגן על היסטוריה
-const cloneItems = (items) => (Array.isArray(items) ? items.map(i => ({ ...i })) : []);
 
 export const PersonalListProvider = ({ children }) => {
-  const [personalList, setPersonalList] = useState([]);      // העגלה הנוכחית
-  const [lastBought, setLastBought] = useState([]);          // מסע אחרון - פריטים שנקנו
-  const [lastStore, setLastStore] = useState(null);          // מסע אחרון - חנות
-  const [tripHistory, setTripHistory] = useState([]);        // היסטוריית מסעות
-  const [selectedTrip, setSelectedTrip] = useState(null);    // מסע מוצג
-
-  // כדי שלא נשמור לפני שסיימנו לטעון
+  const [personalList, setPersonalList] = useState([]);  // The user's personal shopping list    
+  const [lastBought, setLastBought] = useState([]);          // The items bought in the last completed trip
+  const [lastStore, setLastStore] = useState(null);          // The store info of the last completed trip
+  const [tripHistory, setTripHistory] = useState([]);        // History of completed trips
+  const [selectedTrip, setSelectedTrip] = useState(null);    
+// The currently selected trip from history (if any)
   const hydratedRef = useRef(false);
 
-  // --- טעינה ראשונית מהאחסון ---
+// To avoid saving to AsyncStorage before initial load
   useEffect(() => {
     (async () => {
       const [
-        pl, lb, ls, th, selectedTripId
+        pl, lb, ls, th, selectedTripId 
       ] = await Promise.all([
         loadJSON(KEYS.PERSONAL_LIST, []),
         loadJSON(KEYS.LAST_BOUGHT, []),
@@ -68,7 +64,7 @@ export const PersonalListProvider = ({ children }) => {
     })();
   }, []);
 
-  // --- שמירה אוטומטית כשסטייט משתנה ---
+// Save to AsyncStorage on changes (after initial load)
   useEffect(() => {
     if (!hydratedRef.current) return;
     saveJSON(KEYS.PERSONAL_LIST, personalList);
@@ -94,29 +90,50 @@ export const PersonalListProvider = ({ children }) => {
     AsyncStorage.setItem(KEYS.SELECTED_TRIP_ID, selectedTrip ? String(selectedTrip.id) : '');
   }, [selectedTrip]);
 
-  // --- לוגיקה עסקית ---
-  const completeTrip = (storeInfo, boughtProducts = null) => {
-    const moving = boughtProducts?.length ? cloneItems(boughtProducts) : cloneItems(personalList);
+ // Helper: pick a stable key for comparison (prefer barcode)
+const getKey = (p) => p?.barcode ?? p?._id ?? p?.id ?? p?.productId ?? p?.product ?? null;
 
-    const tripData = {
-      id: global.crypto?.randomUUID?.() ?? Date.now().toString(), // עדיף uuid אם קיים
-      store: storeInfo || null,
-      items: moving,
-      completedAt: new Date().toISOString(),
-      tripNumber: tripHistory.length + 1,
-    };
+const completeTrip = (storeInfo, boughtProducts = []) => {
+  // 1) Derive the bought set (by barcode/key)
+  const boughtKeys = new Set(
+    (Array.isArray(boughtProducts) ? boughtProducts : [])
+      .map(getKey)
+      .filter(Boolean)
+  );
 
-    setTripHistory(prev => [tripData, ...prev]);
-    setLastBought(moving);
-    setLastStore(storeInfo || null);
+  // 2) If caller forgot to pass boughtProducts, DO NOT nuke the list.
+  //    Just leave items as-is (or you can early-return).
+  const hadBought = boughtKeys.size > 0;
 
-    if (boughtProducts?.length) {
-      const boughtIds = new Set(boughtProducts.map(p => p.id));
-      setPersonalList(prev => prev.filter(p => !boughtIds.has(p.id)));
-    } else {
-      setPersonalList([]);
-    }
+  // 3) What items to save as the trip’s “items” (last bought)
+  //    If we have boughtProducts, use those; else keep it empty array.
+  const moving = hadBought
+    ? boughtProducts.map((p) => ({ ...p }))
+    : [];
+
+  const tripData = {
+    id: global.crypto?.randomUUID?.() ?? Date.now().toString(),
+    store: storeInfo || null,
+    items: moving,
+    completedAt: new Date().toISOString(),
+    tripNumber: tripHistory.length + 1,
   };
+
+  setTripHistory((prev) => [tripData, ...prev]);
+  setLastBought(moving);
+  setLastStore(storeInfo || null);
+
+  // 4) Only remove actually bought items; keep non-found items in the list
+  if (hadBought) {
+    setPersonalList((prev) =>
+      prev.filter((p) => !boughtKeys.has(getKey(p)))
+    );
+  } else {
+    // No bought items reported → do NOT clear the list
+    // (Optionally: show a toast/snackbar saying "No items were purchased")
+    
+  }
+};
 
   const selectTrip = (tripId) => {
     const trip = tripHistory.find(t => String(t.id) === String(tripId));

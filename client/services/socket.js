@@ -2,7 +2,7 @@ import { io } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Use environment variable or fallback to the current IP
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://172.20.10.14:5000';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://10.0.0.7:5000';
 
 // Create socket with authentication
 const createSocket = async () => {

@@ -1,10 +1,11 @@
 // Main server file for SmartBuy application
-const express    = require('express');
-const mongoose   = require('mongoose');
-const cors       = require('cors');
-const http       = require('http');
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const http = require('http');
 const { Server } = require('socket.io');
-const jwt        = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
+const os = require('os');
 
 require('dotenv').config();
 
@@ -38,8 +39,6 @@ app.use(express.json({ limit: '1mb' }));
 // API routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
-app.use('/api/supermarkets', require('./routes/supermarketRoutes'));
-app.use('/api/offers', require('./routes/offerRoutes'));
 app.use('/api/list', require('./routes/listRoutes'));
 app.use('/api/lists', require('./routes/listRoutes'));
 app.use('/api/suggestions', require('./routes/suggestionRoutes'));
@@ -69,10 +68,7 @@ app.get('/api/groups/my', (req, res) => {
 
 // Connect to MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://Khalid211:khalidkind211@cluster0.r7gzuda.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0';
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-for-smart-buy-app-2024';
 
-// Set JWT_SECRET globally so authController can access it
-process.env.JWT_SECRET = JWT_SECRET;
 
 mongoose
   .connect(MONGO_URI)
@@ -86,7 +82,7 @@ const initializeMLModel = async () => {
     const latest = await Weights.findOne().sort({ updatedAt: -1 }).lean();
 
     const now = Date.now();
-    const oneDay = 24 * 60 * 60 * 1000;
+    const oneDay = 0;
 
     if (latest && now - new Date(latest.updatedAt).getTime() < oneDay) {
       console.log('🤖 ML model is up to date');
@@ -121,10 +117,10 @@ io.use(async (socket, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     socket.userId = decoded.id;
     socket.username = decoded.username;
-    
+
     // Join user's personal room for direct notifications
     socket.join(decoded.id.toString());
-    
+
     console.log(`🔐 Socket authenticated for user: ${decoded.username} (${decoded.id})`);
     next();
   } catch (error) {
@@ -141,16 +137,16 @@ io.on('connection', (socket) => {
   socket.on('joinGroup', async (groupId) => {
     try {
       console.log(`👥 User ${socket.id} attempting to join group: ${groupId}`);
-      
+
       // Store groupId in socket for later use
       socket.groupId = groupId;
-    socket.join(groupId);
-      
-    console.log(`👥 Socket ${socket.id} joined group: ${groupId}`);
-      
-    // Send confirmation to client
-    socket.emit('joinedGroup', { groupId, socketId: socket.id });
-      
+      socket.join(groupId);
+
+      console.log(`👥 Socket ${socket.id} joined group: ${groupId}`);
+
+      // Send confirmation to client
+      socket.emit('joinedGroup', { groupId, socketId: socket.id });
+
       // Also join the group's list room if available
       try {
         const Group = require('./models/Group');
@@ -179,23 +175,23 @@ io.on('connection', (socket) => {
     const { listId, groupId, action, itemName } = data;
     console.log(`📢 Broadcasting update to list ${listId} and group ${groupId}`);
     console.log(`📢 Action: ${action}, Item: ${itemName || 'N/A'}`);
-    
+
     // Emit to both list room and group room for comprehensive coverage
     if (listId) {
-      io.to(listId).emit('listUpdate', { 
-        listId, 
-        groupId, 
+      io.to(listId).emit('listUpdate', {
+        listId,
+        groupId,
         action,
         itemName,
         timestamp: Date.now()
       });
       console.log(`📢 Emitted to list room: ${listId}`);
     }
-    
+
     if (groupId) {
-      io.to(groupId).emit('listUpdate', { 
-        listId, 
-        groupId, 
+      io.to(groupId).emit('listUpdate', {
+        listId,
+        groupId,
         action,
         itemName,
         timestamp: Date.now()
@@ -208,7 +204,7 @@ io.on('connection', (socket) => {
   socket.on('memberAdded', (data) => {
     const { groupId, newMember, addedBy } = data;
     console.log(`👥 Broadcasting memberAdded to group ${groupId}`);
-    
+
     if (groupId) {
       io.to(groupId).emit('memberAdded', {
         groupId,
@@ -224,7 +220,7 @@ io.on('connection', (socket) => {
   socket.on('suggestionUpdate', (data) => {
     const { groupId, productId, userId, action, ...additionalData } = data;
     console.log(`📊 Broadcasting suggestionUpdate to group ${groupId}`);
-    
+
     if (groupId) {
       io.to(groupId).emit('suggestionUpdate', {
         groupId,
@@ -262,22 +258,32 @@ const PORT = process.env.PORT || 5000;
 app.get('/', (req, res) => {
   res.send('Backend is working');
 });
-
+function getLocalIP() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      // Skip over non-IPv4 and internal (like 127.0.0.1)
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost'; // fallback
+}
 server.listen(PORT, () => {
   // Get custom branding from environment variables or use defaults
   const APP_NAME = process.env.APP_NAME || 'SmartBuy';
-  const DEVELOPER_NAME = process.env.DEVELOPER_NAME || 'Your Name';
-  const NETWORK_IP = process.env.NETWORK_IP || '192.168.201.100';
-  
+  const DEVELOPER_NAME = process.env.DEVELOPER_NAME || 'Khaled';
+  const NETWORK_IP = getLocalIP();
+
   console.log(`🚀 ${APP_NAME} Server Started`);
   console.log(`👨‍💻 Developer: ${DEVELOPER_NAME}`);
   console.log(`📍 Port: ${PORT}`);
   console.log(`🔗 Local: http://localhost:${PORT}`);
-  
+
   console.log(`🌐 Network: http://${NETWORK_IP}:${PORT}`);
-  console.log('📱 QR Code will appear below for mobile testing');
   console.log('─'.repeat(50));
-  
+
   // Initialize ML model after server starts
   setTimeout(initializeMLModel, 2000); // Wait 2 seconds for MongoDB connection
 });

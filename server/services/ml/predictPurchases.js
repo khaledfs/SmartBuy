@@ -1,28 +1,25 @@
 const Weights = require('../../models/Weights');
 const TrainingExample = require('../../models/TrainingExample');
 
-// Sigmoid function for logistic regression
 function sigmoid(z) {
   return 1 / (1 + Math.exp(-z));
 }
 
-// Calculate prediction probability using weights
 function predictProbability(X, weights) {
   const z = X.reduce((sum, x_i, i) => sum + x_i * weights[i], 0);
   return sigmoid(z);
 }
 
-// Gradient descent for logistic regression training
+// Train logistic regression using gradient descent 
 function trainLogisticRegression(data, labels, learningRate = 0.01, iterations = 1000) {
   const numSamples = data.length;
   const numFeatures = data[0].length;
 
-  // Initialize weights to 0
   let weights = new Array(numFeatures).fill(0);
-
+  // Gradient descent loop
   for (let k = 0; k < iterations; k++) {
     const gradients = new Array(numFeatures).fill(0);
-
+    // Compute predictions and gradients
     for (let i = 0; i < numSamples; i++) {
       const prediction = predictProbability(data[i], weights);
       const error = prediction - labels[i];
@@ -45,8 +42,9 @@ function trainLogisticRegression(data, labels, learningRate = 0.01, iterations =
 // Train the ML r
 async function trainModel() {
   try {
+    console.log('Starting ML model training...');
     const examples = await TrainingExample.find().lean();
-    
+
     if (examples.length === 0) {
       console.log('No training examples found. Using default weights.');
       return await initializeDefaultWeights();
@@ -54,7 +52,7 @@ async function trainModel() {
 
     // Filter out invalid examples
     const validExamples = examples.filter(e => e && e.features && typeof e.label === 'number');
-    
+
     if (validExamples.length === 0) {
       console.log('No valid training examples found. Using default weights.');
       return await initializeDefaultWeights();
@@ -66,37 +64,39 @@ async function trainModel() {
     // Shuffle examples
     const shuffled = validExamples.sort(() => Math.random() - 0.5);
     const splitIdx = Math.floor(shuffled.length * 0.8); // 80% train, 20% test
-    const trainSet = shuffled.slice(0, splitIdx);
-    const testSet = shuffled.slice(splitIdx);
+    const trainSet = shuffled.slice(0, splitIdx); // 80% train
+    const testSet = shuffled.slice(splitIdx); // 20% test
 
+    // Prepare feature matrices and label vectors
+    // Features: [bias, isFavorite, addedBefore, recentlyadded, timesAdded, AddedFrequency, timesRejected]
+    // Ensure all features are present and default to 0 if missing
     const X_train = trainSet.map(e => {
       // Ensure features object exists and has all required properties
       const features = e.features || {};
       return [
-        features.bias || 1, // Default bias to 1 if not present
+        features.bias || 1,
         features.isFavorite || 0,
-        features.purchasedBefore || 0,
-        features.timesPurchased || 0,
-        features.recentlyPurchased || 0,
-        features.storeCount || 0,
-        features.timesWasRejectedByUser || 0,
-        features.timesWasRejectedByCart || 0
+        features.addedBefore || 0,
+        features.recentlyadded || 0,
+        features.timesAdded || 0,
+        features.AddedFrequency || 0,
+        features.timesRejected || 0,
       ];
     });
+    // Labels
     const y_train = trainSet.map(e => e.label || 0);
 
     const X_test = testSet.map(e => {
       // Ensure features object exists and has all required properties
       const features = e.features || {};
       return [
-        features.bias || 1, // Default bias to 1 if not present
+        features.bias || 1,
         features.isFavorite || 0,
-        features.purchasedBefore || 0,
-        features.timesPurchased || 0,
-        features.recentlyPurchased || 0,
-        features.storeCount || 0,
-        features.timesWasRejectedByUser || 0,
-        features.timesWasRejectedByCart || 0
+        features.addedBefore || 0,
+        features.recentlyadded || 0,
+        features.timesAdded || 0,
+        features.AddedFrequency || 0,
+        features.timesRejected || 0,
       ];
     });
     const y_test = testSet.map(e => e.label || 0);
@@ -104,7 +104,6 @@ async function trainModel() {
     // Train the model on the training set
     const trainedWeights = trainLogisticRegression(X_train, y_train);
 
-    // --- Accuracy Calculation ---
     let accuracy = null;
     if (X_test.length > 0) {
       let correct = 0;
@@ -122,13 +121,13 @@ async function trainModel() {
     const featureNames = [
       'bias',
       'isFavorite',
-      'purchasedBefore',
-      'timesPurchased',
-      'recentlyPurchased',
-      'storeCount',
-      'timesWasRejectedByUser',
-      'timesWasRejectedByCart'
+      'addedBefore',
+      'recentlyadded',
+      'timesAdded',
+      'AddedFrequency',
+      'timesRejected'
     ];
+
 
     // Update weights in database
     await Promise.all(
@@ -154,12 +153,11 @@ async function initializeDefaultWeights() {
   const defaultWeights = {
     bias: 0,
     isFavorite: 0.5,
-    purchasedBefore: 0.3,
-    timesPurchased: 0.2,
-    recentlyPurchased: 0.4,
-    storeCount: 0.1,
-    timesWasRejectedByUser: -0.3,
-    timesWasRejectedByCart: -0.2
+    addedBefore: 0.3,
+    timesAdded: 0.4,
+    recentlyadded: 0.2,
+    timesRejected: -0.3,
+    AddedFrequency: 0.1
   };
 
   await Promise.all(
@@ -175,7 +173,6 @@ async function initializeDefaultWeights() {
   return Object.values(defaultWeights);
 }
 
-// Update weights with a single example (online learning)
 async function updateWeights(x, y, learningRate = 0.01) {
   try {
     const weights = await Weights.find().sort({ featureName: 1 }).lean();
@@ -184,7 +181,6 @@ async function updateWeights(x, y, learningRate = 0.01) {
 
     const p = predictProbability(x, w);
 
-    // Calculate gradient
     const error = p - y;
     const newW = w.map((wi, i) => wi - learningRate * error * x[i]);
     const now = new Date();
@@ -204,17 +200,19 @@ async function updateWeights(x, y, learningRate = 0.01) {
     throw error;
   }
 }
-
-// Rank products by purchase probability
 async function rankProducts(productFeatureMap) {
   try {
     const weights = await Weights.find().lean();
-    
+
     if (weights.length === 0) {
       console.log('No weights found. Using default ranking.');
-      return Array.from(productFeatureMap.entries()).map(([productId, data]) => ({
-        productId,
-        probability: 0.5 // Default probability
+      return Array.from(productFeatureMap.values()).map(item => ({
+        productId: item.productId,
+        name: item.name,
+        barcode: item.barcode,
+        img: item.img,
+        type: item.type,
+        probability: 0.5
       }));
     }
 
@@ -222,19 +220,22 @@ async function rankProducts(productFeatureMap) {
     const w = weights.map(wi => wi.weight);
 
     const ranked = [];
-
     for (const [productId, data] of productFeatureMap.entries()) {
       const featureVector = [1]; // bias
       for (const featureName of featureNames.slice(1)) {
         featureVector.push(data[featureName] ?? 0);
       }
-
-      // Predict purchase probability
+      
       const prob = predictProbability(featureVector, w);
-      ranked.push({ productId, probability: prob });
+      ranked.push({
+        productId,
+        name: data.name,
+        barcode: data.barcode,
+        img: data.img,
+        type: data.type,
+        probability: prob
+      });
     }
-
-    // Sort by probability (highest first)
     ranked.sort((a, b) => b.probability - a.probability);
     return ranked;
   } catch (error) {

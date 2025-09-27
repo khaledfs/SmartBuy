@@ -1,12 +1,16 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, Alert, Linking, Platform, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import PersonalListContext from '../services/PersonalListContext';
 
 const StoreDetailScreen = ({ route, navigation }) => {
-  const { store, products, tripType, groupId, currentUserId, groupCreatorId } = route.params || {};
+  const { store, products, tripType, groupId } = route.params || {};
   const { completeTrip } = React.useContext(PersonalListContext);
+
+
+// State for navigation sheet
+  const [navSheetVisible, setNavSheetVisible] = React.useState(false);
 
   // Helper to get product details from barcode
   const getProductByBarcode = (barcode) => {
@@ -28,95 +32,138 @@ const StoreDetailScreen = ({ route, navigation }) => {
   const realPrices = store.realPrices || {};
   const estimatedPrices = store.estimatedPrices || {};
   const itemPrices = store.itemPrices || {};
-  
+
   // All products should now have prices (real or estimated)
   const allProducts = products;
-  
+  const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
   // Use the backend-calculated totals and counts
   const realPriceCount = store.realPriceCount || Object.keys(realPrices).length;
-  const estimatedPriceCount = store.estimatedPriceCount || Object.keys(estimatedPrices).length;
   const realPriceTotal = store.realPriceTotal || Object.values(realPrices).reduce((sum, price) => sum + price, 0);
-  const estimatedPriceTotal = store.estimatedPriceTotal || Object.values(estimatedPrices).reduce((sum, price) => sum + price, 0);
   const totalPrice = store.totalPrice || realPriceTotal; // Only real prices for total
+
+//  Navigation functions
+  const openInAppleMaps = async (address) => {
+    const enc = encodeURIComponent(address);
+    const url = `http://maps.apple.com/?daddr=${enc}&dirflg=d`;
+    await Linking.openURL(url);
+  };
+
+  const openInGoogleMaps = async (address) => {
+    const enc = encodeURIComponent(address);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${enc}&travelmode=driving`;
+    await Linking.openURL(url);
+  };
+
+  const openInWaze = async (address) => {
+    const enc = encodeURIComponent(address);
+    const scheme = `waze://?q=${enc}&navigate=yes`;
+    const fallback = `https://waze.com/ul?q=${enc}&navigate=yes`;
+    const can = await Linking.canOpenURL(scheme);
+    await Linking.openURL(can ? scheme : fallback);
+  };
+
+  const onPressNavigate = () => setNavSheetVisible(true);
+
 
   const handleBuy = async () => {
     console.log('Buy button pressed', { tripType, store });
+
     if (tripType === 'group' && groupId) {
       try {
-        // Get the products that were actually found/bought from this store
-        const foundBarcodes = store.foundBarcodes || [];
-        const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
-        console.log('Products to mark as bought:', boughtProducts.map(p => p.name));
-        console.log('Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
-        // Get the scraped product details (including images) from the store data
-        const boughtProductsWithDetails = boughtProducts.map(p => {
-          const scrapedDetails = store.productDetails?.[p.barcode];
-          return {
-            _id: p._id,
-            barcode: p.barcode,
-            name: scrapedDetails?.name || p.name,
-            quantity: p.quantity || 1,
-            img: scrapedDetails?.img || p.img,
-            icon: scrapedDetails?.icon || p.icon,
-            productId: p.productId || p.product || null
-          };
-        });
-        
+        const itemPrices =
+          (store.itemPrices && typeof store.itemPrices === 'object')
+            ? Object.entries(store.itemPrices).reduce((acc, [bc, price]) => {
+              const n = parseFloat(price);
+              if (!isNaN(n)) acc[bc] = n;
+              return acc;
+            }, {})
+            : (store.productDetails
+              ? Object.entries(store.productDetails).reduce((acc, [bc, d]) => {
+                const n = parseFloat(d?.price);
+                if (!isNaN(n)) acc[bc] = n;
+                return acc;
+              }, {})
+              : {});
+
+        const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
+
+        const foundBarcodes = Array.isArray(store.foundBarcodes) ? store.foundBarcodes : [];
+        const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
+
+        const boughtProducts = products
+          .filter(p => barcodesBought.includes(p.barcode))
+          .map(p => {
+            const scraped = store.productDetails?.[p.barcode];
+            return {
+              _id: p._id,
+              barcode: p.barcode,
+              name: scraped?.name || p.name,
+              quantity: p.quantity || 1,
+              img: scraped?.img || p.img || p.icon,
+              icon: scraped?.icon || p.icon || p.img,
+              productId: p.productId || p.product || null,
+            };
+          });
+
         await api.post(`/groups/${groupId}/list/complete-trip`, {
           store: {
-            branch: store.branch,
+            branch: store.branch || store.storeName,
             address: store.address,
+            itemPrices,
             totalPrice: store.totalPrice ?? store.price ?? null,
           },
-          boughtProducts: boughtProductsWithDetails
+          boughtProducts,
         });
-        // Navigate back to group list with success
-        navigation.replace('GroupSharedList', { groupId });
+
+        navigation.pop(2);
       } catch (err) {
         Alert.alert('Error', 'Failed to complete group trip');
       }
     } else if (tripType === 'personal') {
-      console.log('Personal trip buy logic triggered');
       try {
-        // Get the products that were actually found/bought from this store
-        const foundBarcodes = store.foundBarcodes || [];
-        const boughtProducts = products.filter(p => foundBarcodes.includes(p.barcode));
-        
-        console.log('Personal trip - Products to mark as bought:', boughtProducts.map(p => p.name));
-        console.log('Personal trip - Products that will be lost:', products.filter(p => !foundBarcodes.includes(p.barcode)).map(p => p.name));
-        
+        const itemPrices = (store.itemPrices && typeof store.itemPrices === 'object') ? store.itemPrices : {};
+        const positiveBarcodes = Object.entries(itemPrices)
+          .filter(([_, price]) => parseFloat(price) > 0)
+          .map(([bc]) => bc);
+
+        const foundBarcodes = Array.isArray(store.foundBarcodes) ? store.foundBarcodes : [];
+        const barcodesBought = positiveBarcodes.length ? positiveBarcodes : foundBarcodes;
+
+        const boughtProducts = products.filter(p => barcodesBought.includes(p.barcode))
+          .map(p => ({ ...p, img: p.image || p.img || p.icon, icon: p.image || p.img || p.icon }));
+
         completeTrip({
           branch: store.branch || store.storeName,
           address: store.address,
           totalPrice: store.totalPrice ?? store.price ?? null,
         }, boughtProducts);
-        console.log('Navigating to TransitionScreenPersonal');
-        navigation.replace('TransitionScreenPersonal');
+
+        navigation.replace('beforeShopping');
       } catch (err) {
         console.log('Error in personal trip buy logic:', err);
         Alert.alert('Error', 'Failed to complete personal trip');
       }
     } else {
-      console.log('Unknown or missing tripType:', tripType);
       Alert.alert('Error', 'Unknown or missing trip type.');
     }
   };
 
-  const renderItemCard = (product) => {
-    // Get the actual product image and details from store data if available
+  const renderItemCard = (product, index) => {
     const productDetails = store.productDetails?.[product.barcode];
     const displayName = productDetails?.name || product.name;
     const displayImage = productDetails?.img || product.image || product.img || product.icon;
-    const displayPrice = itemPrices[product.barcode] || 0;
+    const displayPrice = itemPrices[product.barcode] || '--';
     const isEstimated = estimatedPrices[product.barcode] || productDetails?.isEstimated;
-    
+
     return (
-      <View key={product.barcode} style={[styles.itemCard, isEstimated && styles.estimatedItemCard]}>
-        <Image 
-          source={displayImage ? { uri: displayImage } : require('../assets/favicon.png')} 
-          style={[styles.itemImage, isEstimated && styles.estimatedImage]} 
+      <View key={index} style={[styles.itemCard, isEstimated && styles.estimatedItemCard]}>
+        <Image
+          source={displayImage ? { uri: displayImage } : require('../assets/favicon.png')}
+          style={[styles.itemImage, isEstimated && styles.estimatedImage]}
         />
         <View style={styles.itemInfo}>
           <Text style={[styles.itemName, isEstimated && styles.estimatedText]} numberOfLines={2}>
@@ -124,10 +171,10 @@ const StoreDetailScreen = ({ route, navigation }) => {
           </Text>
           <View style={styles.priceContainer}>
             <Text style={[
-              styles.itemPrice, 
-              isEstimated && { color: '#ff9800', fontWeight: 'bold' } // Orange for estimated prices
+              styles.itemPrice,
+              isEstimated && { color: '#ff9800', fontWeight: 'bold' }
             ]}>
-              ₪{displayPrice}
+              {displayPrice === '--' ? displayPrice : `₪${displayPrice}`}
             </Text>
             {isEstimated && (
               <Text style={styles.estimatedLabel}>מחיר משוער</Text>
@@ -144,41 +191,41 @@ const StoreDetailScreen = ({ route, navigation }) => {
       <View style={styles.storeInfoCard}>
         <View style={styles.storeHeader}>
           <View style={styles.storeIconContainer}>
-            <Ionicons 
-              name={getStoreIcon(store.branch)} 
-              size={40} 
-              color="#1976D2" 
+            <Ionicons
+              name={getStoreIcon(store.branch)}
+              size={40}
+              color="#1976D2"
             />
           </View>
           <View style={styles.storeDetails}>
             <Text style={styles.storeName}>{store.branch}</Text>
             <Text style={styles.storeAddress}>{store.address}</Text>
-            <Text style={styles.storeTotal}>מחיר אמיתי: ₪{store.totalPrice || 'N/A'}</Text>
+            <Text style={styles.storeTotal}>מחיר : ₪{store.totalPrice.toFixed(2) || 'N/A'}</Text>
             {store.distance !== null && store.distance !== undefined && (
               <Text style={styles.storeDistance}>מרחק: {store.distance} ק"מ</Text>
             )}
           </View>
         </View>
+
+        {/* Navigation Button */}
+        <TouchableOpacity style={styles.navButton} onPress={onPressNavigate}>
+          <Ionicons name="navigate" size={18} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {/* All Products Card */}
       <View style={styles.itemsCard}>
-        <Text style={styles.cardTitle}>כל המוצרים</Text>
+        <Text style={styles.cardTitle}>המוצרים שנמצאו</Text>
         <Text style={styles.itemsCount}>
-          {allProducts.length} מוצרים ({realPriceCount} מחירים אמיתיים)
+          {positiveBarcodes.length} מוצרים
         </Text>
         {allProducts.length > 0 ? (
           <>
             <ScrollView style={styles.itemsList}>
-              {allProducts.map(product => renderItemCard(product))}
+              {allProducts.map((product, index) => renderItemCard(product, index))}
             </ScrollView>
             <View style={styles.totalSection}>
-              <Text style={styles.totalText}>סה"כ מחירים אמיתיים: ₪{totalPrice.toFixed(2)}</Text>
-              {estimatedPriceTotal > 0 && (
-                <Text style={styles.estimatedTotalText}>
-                  מחירים משוערים נוספים: ₪{estimatedPriceTotal.toFixed(2)}
-                </Text>
-              )}
+              <Text style={styles.totalText}>סה"כ : ₪{totalPrice.toFixed(2)}</Text>
             </View>
           </>
         ) : (
@@ -192,6 +239,59 @@ const StoreDetailScreen = ({ route, navigation }) => {
           <Text style={styles.buyButtonText}>Buy from this Store</Text>
         </TouchableOpacity>
       ) : null}
+
+      {/* Navigation Options Modal */}
+      <Modal
+        visible={navSheetVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setNavSheetVisible(false)}
+      >
+        <View style={styles.navSheetOverlay}>
+          <View style={styles.navSheet}>
+            <Text style={styles.navSheetTitle}>Choose application</Text>
+
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                style={styles.navOption}
+                onPress={async () => {
+                  setNavSheetVisible(false);
+                  try { await openInAppleMaps(store.address); } catch { }
+                }}
+              >
+                <Text style={styles.navOptionText}>Maps</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.navOption}
+              onPress={async () => {
+                setNavSheetVisible(false);
+                try { await openInGoogleMaps(store.address); } catch { }
+              }}
+            >
+              <Text style={styles.navOptionText}>Google Maps</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navOption}
+              onPress={async () => {
+                setNavSheetVisible(false);
+                try { await openInWaze(store.address); } catch { }
+              }}
+            >
+              <Text style={styles.navOptionText}>Waze</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navCancel}
+              onPress={() => setNavSheetVisible(false)}
+            >
+              <Ionicons name="close" size={18} color="#444" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -211,6 +311,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    position: 'relative',
   },
   storeHeader: {
     flexDirection: 'row',
@@ -249,6 +350,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
   },
+
+  navButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#1976D2',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+
   itemsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -282,9 +398,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   estimatedItemCard: {
-    backgroundColor: '#fff8e1', // Light orange background for estimated items
+    backgroundColor: '#fff8e1',
     borderWidth: 1,
-    borderColor: '#ffb74d', // Orange border
+    borderColor: '#ffb74d',
   },
   itemImage: {
     width: 50,
@@ -292,9 +408,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginRight: 12,
   },
-  estimatedImage: {
-    opacity: 0.8, // Slightly dimmed for estimated items
-  },
+  estimatedImage: { opacity: 0.8 },
   itemInfo: {
     flex: 1,
     flexDirection: 'row',
@@ -308,61 +422,19 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
-  priceContainer: {
-    alignItems: 'flex-end',
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976D2',
-  },
-  estimatedText: {
-    color: '#ff9800', // Orange text for estimated items
-  },
-  estimatedLabel: {
-    fontSize: 10,
-    color: '#ff9800',
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
+  priceContainer: { alignItems: 'flex-end' },
+  itemPrice: { fontSize: 14, fontWeight: '600', color: '#1976D2' },
+  estimatedText: { color: '#ff9800' },
+  estimatedLabel: { fontSize: 10, color: '#ff9800', fontStyle: 'italic', marginTop: 2 },
   totalSection: {
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
     paddingTop: 12,
     marginTop: 8,
   },
-  totalText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    textAlign: 'right',
-  },
-  realTotalText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    textAlign: 'right',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  estimatedTotalText: {
-    fontSize: 12,
-    color: '#ff9800',
-    textAlign: 'right',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  noItemsText: {
-    fontSize: 14,
-    color: '#b71c1c',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  allFoundText: {
-    fontSize: 14,
-    color: '#388e3c',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
+  totalText: { fontSize: 16, fontWeight: 'bold', color: '#1976D2', textAlign: 'right' },
+  noItemsText: { fontSize: 14, color: '#b71c1c', textAlign: 'center', fontStyle: 'italic' },
+
   buyButton: {
     backgroundColor: '#1976D2',
     borderRadius: 8,
@@ -371,11 +443,39 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 20,
   },
-  buyButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+  buyButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+
+  // ↙️ סגנונות לחלונית הבחירה
+  navSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+  navSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  navSheetTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  navOption: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e6e6e6',
+  },
+  navOptionText: { fontSize: 16, color: '#222' },
+  navCancel: {
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 6,
+    padding: 8,
   },
 });
 
-export default StoreDetailScreen; 
+export default StoreDetailScreen;

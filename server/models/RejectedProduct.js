@@ -22,10 +22,6 @@ const rejectedProductSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-// Ensure unique rejections per user per product per group
-rejectedProductSchema.index(
-  { groupId: 1, productId: 1, rejectedBy: 1 },
-  { unique: true }
-);
+
 
 module.exports = mongoose.model('RejectedProduct', rejectedProductSchema); 

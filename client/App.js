@@ -12,11 +12,11 @@ import SignupScreen from './screens/SignupScreen';
 import MyListScreen from './screens/MyListScreen';
 import TransitionScreen from './screens/TransitionScreen';
 import TransitionScreen2 from './screens/TransitionScreen2';
-import GroupListScreen from './screens/GroupListScreen';
+import GroupsScreen from './screens/GroupsScreen';
 import GroupDetailScreen from './screens/GroupDetailScreen';
 import WhereToBuyScreen from './screens/WhereToBuyScreen';
 import SmartSuggestionsScreen from './screens/SmartSuggestionsScreen';
-import ProductListScreen from './screens/ProductListScreen';
+//import ProductListScreen from './screens/ProductListScreen';
 import { PersonalListProvider } from './services/PersonalListContext';
 import GroupSharedListScreen from './screens/GroupSharedListScreen';
 import TransitionScreenPersonal from './screens/TransitionScreenPersonal';
@@ -45,19 +45,22 @@ export default function App() {
             <Stack.Screen name="beforeMain" component={TransitionScreen} options={{ headerShown: false }} />
             <Stack.Screen name="beforeShopping" component={TransitionScreen2} options={{ headerShown: false }} />
             <Stack.Screen name="Main" component={MainScreen} options={{
-              
+
               headerTitle: '🛒 Smart Buy',
               headerTitleAlign: 'center',
               headerTitleStyle: {
                 fontSize: 32,
                 fontWeight: 'bold',
-                color: '#2E7D32',
-                
+                color: '#ffffffff',
+
+              },
+              headerStyle: {
+                backgroundColor: '#2E7D32',
               },
             }} />
-            <Stack.Screen name="MyList" component={MyListScreen} />
-            <Stack.Screen name="GroupList" component={GroupListScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ headerShown: false }}  />
+            <Stack.Screen name="MyList" component={MyListScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="GroupList" component={GroupsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ headerShown: false }} />
             <Stack.Screen name="WhereToBuy" component={WhereToBuyScreen} />
             <Stack.Screen name="SmartSuggestions" component={SmartSuggestionsScreen} options={{
               headerTitle: '',
@@ -68,8 +71,8 @@ export default function App() {
                 color: '#2E7D32',
               },
             }} />
-            <Stack.Screen name="ProductListScreen" component={ProductListScreen} />
-            <Stack.Screen name="GroupSharedList" component={GroupSharedListScreen} />
+           {/* <Stack.Screen name="ProductListScreen" component={ProductListScreen} /> */}
+            <Stack.Screen name="GroupSharedList" component={GroupSharedListScreen} options={{ headerShown: false }} />
             <Stack.Screen name="TransitionScreenPersonal" component={TransitionScreenPersonal} options={{ headerShown: false }} />
             <Stack.Screen name="TransitionScreenGroup" component={TransitionScreenGroup} options={{ headerShown: false }} />
             <Stack.Screen name="StoreDetail" component={StoreDetailScreen} options={{

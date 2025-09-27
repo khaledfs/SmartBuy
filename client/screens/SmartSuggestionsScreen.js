@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -26,7 +26,7 @@ const MAIN_TABS = [
 
 const SMART_SUB_TABS = [
   { key: 'recent', name: 'RECENT', icon: 'time', color: '#45B7D1' },
-  { key: 'frequent', name: 'FREQUENT', icon: 'repeat', color: '#FF6B6B' },
+  { key: 'SmartShop', name: 'SMARTSHOP', icon: 'bulb', color: '#FF6B6B' },
   { key: 'favorite', name: 'FAVORITE', icon: 'heart', color: '#FFEAA7' },
 ];
 
@@ -55,6 +55,40 @@ const useProductJson = () => {
   return { loadProducts, loading, error };
 };
 
+/** Memoized local-state search bar (only this re-renders while typing) */
+const SearchBar = memo(function SearchBar({ onDebouncedChange, loading }) {
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => onDebouncedChange(text), 500);
+    return () => clearTimeout(t);
+  }, [text, onDebouncedChange]);
+
+  return (
+    <View style={styles.searchContainer}>
+      <View style={styles.searchInputContainer}>
+        <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search products..."
+          placeholderTextColor="#999"
+          value={text}
+          onChangeText={setText}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {loading ? (
+          <ActivityIndicator size="small" color="#2E7D32" />
+        ) : text.length > 0 ? (
+          <TouchableOpacity style={styles.clearButton} onPress={() => setText('')}>
+            <Ionicons name="close-circle" size={20} color="#666" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+});
+
 const SmartSuggestionsScreen = ({ navigation, route }) => {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,18 +96,21 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
   const [selectedMainTab, setSelectedMainTab] = useState('all');
   const [selectedSmartTab, setSelectedSmartTab] = useState('recent');
   const [favorites, setFavorites] = useState(new Set());
-  const [showFavoritesModal, setShowFavoritesModal] = useState(false);
-  const [favoriteItems, setFavoriteItems] = useState([]);
+
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [addedItemsCount, setAddedItemsCount] = useState(0);
-  const [searchTerm, setSearchTerm] = useState('');
+
+  // 🔽 Only change here: use a debounced parent value & local SearchBar state
+  const [query, setQuery] = useState('');             // debounced text from SearchBar
+  const [searchLoading, setSearchLoading] = useState(false); // loading for search only
+  const [searchVersion, setSearchVersion] = useState(0);     // bump to reset SearchBar input
+
   const [filteredSuggestions, setFilteredSuggestions] = useState([]);
   const [loadedProductIds, setLoadedProductIds] = useState(new Set());
-  // Add loading states for individual items
+
   const [addingItems, setAddingItems] = useState(new Set());
   const [addedItems, setAddedItems] = useState(new Set());
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [preloadedAllProducts, setPreloadedAllProducts] = useState([]);
 
   const groupId = route?.params?.groupId || null;
@@ -83,7 +120,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
   // Determine the current category based on selected tabs
   const getCurrentCategory = () => {
     if (selectedMainTab === 'all') return 'all';
-    if (selectedMainTab === 'smart') return selectedSmartTab; // recent, frequent, or favorite
+    if (selectedMainTab === 'smart') return selectedSmartTab; // recent, SmartShop, or favorite
     return 'all'; // fallback
   };
 
@@ -117,7 +154,8 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
         setOffset(30);
         setHasMore(preloadedAllProducts.length > 0);
         setFilteredSuggestions([]);
-        setSearchTerm('');
+        setQuery('');
+        setSearchVersion((v) => v + 1); // reset input
         setLoading(false);
       } else if (suggestions.length === 0) {
         setSuggestions([]);
@@ -125,7 +163,8 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
         setOffset(0);
         setHasMore(true);
         setLoadedProductIds(new Set());
-        setSearchTerm('');
+        setQuery('');
+        setSearchVersion((v) => v + 1); // reset input
         fetchSmartSuggestions('all', 0, true);
       }
     } else if (selectedMainTab === 'smart') {
@@ -190,50 +229,36 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
     };
   }, [groupId]);
 
-  // Debounce search term to avoid searching on every character
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 500); // Wait 500ms after user stops typing
-
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Handle search filtering with debounced search term
+  // 🔽 Replaces the old debouncedSearchTerm plumbing (search runs without global loading)
   useEffect(() => {
     if (selectedMainTab === 'all') {
-      if (debouncedSearchTerm.trim()) {
-        // Search the database directly instead of filtering loaded items
-        searchProducts(debouncedSearchTerm);
+      if (query.trim()) {
+        searchProducts(query);
       } else {
-        // Reset to normal pagination when search is cleared
         setFilteredSuggestions([]);
-        // Don't reset suggestions - keep the loaded products for infinite scrolling
-        // setSuggestions([]); // REMOVED - this was causing the issue
-        setOffset(suggestions.length); // Set offset to current loaded count
+        setOffset(suggestions.length); // keep loaded count for pagination
         setHasMore(true);
         setLoadedProductIds(new Set(suggestions.map(p => p.productId || p._id)));
         console.log('🔍 ALL card: Search cleared, returning to pagination mode with', suggestions.length, 'loaded products');
       }
     }
-  }, [debouncedSearchTerm, selectedMainTab]);
+  }, [query, selectedMainTab, suggestions]);
 
-  // New function to search products directly from database
+  // Search the database directly; do NOT flip global loading
   const searchProducts = async (searchQuery) => {
     try {
-      setLoading(true);
+      setSearchLoading(true);
       setFilteredSuggestions([]);
 
-      // Search the database directly using the existing products endpoint
       const response = await api.get(`/products?q=${encodeURIComponent(searchQuery)}&limit=100`);
       const searchResults = response.data || [];
 
       setFilteredSuggestions(searchResults);
-      setLoading(false);
     } catch (error) {
       console.error('Error searching products:', error);
-      setLoading(false);
       showToast('Failed to search products');
+    } finally {
+      setSearchLoading(false);
     }
   };
 
@@ -242,29 +267,26 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
     const backAction = () => {
       // Hierarchical navigation logic
       if (selectedMainTab === 'smart' && selectedSmartTab !== 'recent') {
-        // If we're in a specific smart sub-tab (favorite, frequent), go back to recent
         setSelectedSmartTab('recent');
         setSuggestions([]);
         fetchSmartSuggestions('recent');
-        return true; // Prevent default back action
+        return true;
       } else if (selectedMainTab === 'smart') {
-        // If we're in smart tab (showing sub-tabs), go back to ALL tab
         setSelectedMainTab('all');
         setSelectedSmartTab('recent');
         setSuggestions([]);
         setOffset(0);
         setHasMore(true);
         fetchSmartSuggestions('recent');
-        return true; // Prevent default back action
+        return true;
       } else if (selectedMainTab === 'all') {
-        // If we're in ALL tab, go back to Group Detail
-        selectedMainTab('smart')
+        selectedMainTab('smart') // (kept as-is)
         setSelectedSmartTab('recent');
         setSuggestions([]);
         fetchSmartSuggestions('recent');
-        return true; // Allow default back action (go to Group Detail)
+        return true;
       }
-      return false; // Allow default back action
+      return false;
     };
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
@@ -275,36 +297,29 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
     try {
       console.log('🔄 Fetching smart suggestions for category:', category, 'GroupId:', groupId);
 
-      // Use different loading states for initial load vs pagination
       if (reset) {
         setLoading(true);
       } else {
         setLoadingMore(true);
       }
 
-      // For ALL, use the exact same logic as MainScreen
       if (category === 'all') {
-        // Don't fetch more products if we're currently searching
-        if (searchTerm.trim()) {
+        // don't paginate while searching
+        if (query.trim()) {
           setLoading(false);
           setLoadingMore(false);
           return;
         }
 
         console.log('📦 ALL card: Fetching products:', reset ? 'initial' : 'pagination', 'offset:', reset ? 0 : customOffset);
-
-        // Use the exact same API call as MainScreen - optimized for speed
         const res = await api.get(`/products?limit=30&offset=${reset ? 0 : customOffset}`);
         const allProducts = res.data || [];
-
         console.log('📦 ALL card: Received products:', allProducts.length);
 
-        // Optimized filtering - only basic image validation for speed
         const validProducts = allProducts.filter(product => {
           const img = product.img || product.image;
           return img && img !== '' && img !== 'null';
         });
-
         console.log('📦 ALL card: Valid products:', validProducts.length);
 
         if (reset) {
@@ -323,19 +338,18 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
 
         return;
       }
-      // For smart cards, fetch only product IDs and then fetch details from backend - OPTIMIZED
+
+      // smart tabs
       let type = category;
-      if (["recent", "favorite", "frequent"].includes(type)) {
-        const url = `/suggestions/smart?groupId=${groupId}&type=${type}&limit=20`; // Reduced from 50 to 20
+      if (["recent", "favorite", "SmartShop"].includes(type)) {
+        const url = `/suggestions/smart?groupId=${groupId}&type=${type}&limit=20`;
         const response = await api.get(url);
         const suggestionsList = response.data.suggestions || [];
 
-        // OPTIMIZED: Batch fetch product details instead of individual calls
         if (suggestionsList.length > 0) {
           const productIds = suggestionsList.map(s => s.productId).filter(Boolean);
 
           try {
-            // Batch fetch all products at once
             const batchResponse = await api.post('/products/batch', { productIds });
             const productMap = new Map();
 
@@ -345,7 +359,6 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
               });
             }
 
-            // Merge product details with suggestions
             const productDetails = suggestionsList.map(s => {
               const product = productMap.get(s.productId);
               return product ? { ...product, ...s } : { productId: s.productId, name: 'Unknown Product', img: '', ...s };
@@ -354,21 +367,16 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
             setSuggestions(productDetails);
 
             if (type === 'favorite') {
-              // For favorite tab, all items are favorites by definition
               const favoriteIds = new Set(productDetails.map(f => f.productId));
               console.log('💖 Setting favorites from server response:', favoriteIds);
               setFavorites(favoriteIds);
             } else {
-              // For other tabs, check which items are favorited
               await loadFavoritesStatus(productDetails);
             }
           } catch (err) {
-            // Silently handle batch fetch failure - this is expected behavior
             console.log('📦 Batch fetch not available, using individual calls (this is normal)');
-
-            // Fallback to individual calls if batch fails
             const productDetails = await Promise.all(
-              suggestionsList.slice(0, 10).map(async (s) => { // Limit to 10 for performance
+              suggestionsList.slice(0, 10).map(async (s) => {
                 try {
                   const prodRes = await api.get(`/products/${s.productId}`);
                   return { ...prodRes.data, ...s };
@@ -403,7 +411,6 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
         return;
       }
 
-      // Only load favorites if we're on the favorite tab to improve performance
       if (selectedSmartTab !== 'favorite') {
         console.log('⏭️ Skipping favorites load - not on favorite tab');
         return;
@@ -419,7 +426,6 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
             }
           } catch (error) {
             console.error(`❌ Error checking favorite status for product ${item.productId}:`, error);
-            // Continue with other items even if one fails
           }
         }
       }
@@ -432,77 +438,45 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
   // Toggle favorite status - optimized to prevent page reload
   const toggleFavorite = async (productId) => {
     try {
-      // Validate required parameters
       if (!productId) {
-        console.error('❌ No productId provided to toggleFavorite');
         showToast('Invalid product ID');
         return;
       }
-
       if (!groupId) {
-        console.error('❌ No groupId available for favorite toggle');
         showToast('Group context is required for favorites');
         return;
       }
 
       console.log('🔍 Toggle favorite:', productId, 'GroupId:', groupId, 'Current favorites:', Array.from(favorites));
-
       const isFavorited = favorites.has(productId);
-      console.log('🔍 Is favorited:', isFavorited);
 
-      // Optimistic update - update UI immediately
       setFavorites(prev => {
         const newSet = new Set(prev);
-        if (isFavorited) {
-          newSet.delete(productId);
-          console.log('🔍 Removing from favorites:', productId);
-        } else {
-          newSet.add(productId);
-          console.log('🔍 Adding to favorites:', productId);
-        }
+        if (isFavorited) newSet.delete(productId);
+        else newSet.add(productId);
         return newSet;
       });
 
       if (isFavorited) {
-        const response = await api.post('/suggestions/favorites/remove', { productId, groupId });
-        console.log('✅ Removed from favorites:', productId);
-
-        // Remove item from suggestions list if we're on favorite tab
+        await api.post('/suggestions/favorites/remove', { productId, groupId });
         if (selectedMainTab === 'smart' && selectedSmartTab === 'favorite') {
           setSuggestions(prev => prev.filter(item => item.productId !== productId && item._id !== productId));
         }
-
         showToast('Removed from favorites');
       } else {
-        const response = await api.post('/suggestions/favorites/add', { productId, groupId });
-        console.log('✅ Added to favorites:', productId);
+        await api.post('/suggestions/favorites/add', { productId, groupId });
         showToast('Added to favorites');
       }
     } catch (error) {
-      console.error('❌ Error toggling favorite:', error.message);
-
-      // Revert optimistic update on error
+      console.error('❌ Error toggling favorite:', error?.message);
+      // revert optimistic on error
       setFavorites(prev => {
-        const newSet = new Set(prev);
-        if (isFavorited) {
-          newSet.add(productId); // Revert to favorited state
-        } else {
-          newSet.delete(productId); // Revert to not favorited state
-        }
-        console.log('🔍 Reverted favorites to:', Array.from(newSet));
-        return newSet;
+        const ns = new Set(prev);
+        if (ns.has(productId)) ns.delete(productId);
+        else ns.add(productId);
+        return ns;
       });
-
-      // Provide more specific error messages
-      if (error.response?.status === 400) {
-        showToast(error.response.data?.message || 'Invalid request data');
-      } else if (error.response?.status === 401) {
-        showToast('Authentication required');
-      } else if (error.response?.status === 500) {
-        showToast('Server error - please try again');
-      } else {
-        showToast('Failed to update favorite status');
-      }
+      showToast('Failed to update favorite status');
     }
   };
 
@@ -516,8 +490,8 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
 
   const getCategoryIcon = (type) => {
     switch (type) {
-      case 'frequent':
-        return 'repeat';
+      case 'SmartShop':
+        return 'bulb';
       case 'recent':
         return 'time';
       case 'popular':
@@ -533,7 +507,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
 
   const getCategoryColor = (type) => {
     switch (type) {
-      case 'frequent':
+      case 'SmartShop':
         return '#FF6B6B';
       case 'recent':
         return '#4ECDC4';
@@ -550,8 +524,8 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
 
   const getCategoryName = (type) => {
     switch (type) {
-      case 'frequent':
-        return 'Frequently Added';
+      case 'SmartShop':
+        return 'SmartShop Added';
       case 'recent':
         return 'Recently Added';
       case 'popular':
@@ -564,10 +538,10 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
         return 'Smart Pick';
     }
   };
-const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'favorite';
 
   const renderSuggestion = ({ item, index }) => {
     const itemId = item.productId || item._id;
+    const isFavoritesPage = (selectedMainTab === 'smart' && selectedSmartTab === 'favorite') || (selectedMainTab === 'all');
     const isAdding = addingItems.has(itemId);
     const wasAdded = addedItems.has(itemId);
 
@@ -582,14 +556,12 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
           <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(item.type) }]}>
             <Ionicons name={getCategoryIcon(item.type)} size={12} color="#fff" />
           </View>
-          {/* Cart indicator for favorites */}
           {item.type === 'favorite' && item.isInCart && (
             <View style={[styles.intelligentBadge, { backgroundColor: '#4CAF50' }]}>
               <Ionicons name="checkmark-circle" size={10} color="#fff" />
             </View>
           )}
-          {/* Intelligent indicators for frequent products */}
-          {item.type === 'frequent' && (
+          {item.type === 'SmartShop' && (
             <>
               {item.isOverdue && (
                 <View style={[styles.intelligentBadge, { backgroundColor: '#FF4444' }]}>
@@ -611,7 +583,6 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
         </View>
         <View style={styles.suggestionInfo}>
           <Text style={styles.suggestionName}>{item.name}</Text>
-          {/* Show interaction details for favorites */}
           {item.type === 'favorite' && (
             <Text style={styles.suggestionReason}>
               {item.isFavorited && '❤️ Favorited '}
@@ -621,7 +592,6 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               {item.totalInteractions > 1 && ` (${item.totalInteractions} interactions)`}
             </Text>
           )}
-          {/* Show smart reason for recent */}
           {item.type === 'recent' && (
             <>
               <Text style={styles.suggestionReason}>
@@ -634,20 +604,14 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               )}
             </>
           )}
-          {/* Show smart reason for frequent */}
-          {item.type === 'frequent' && (
+          {item.type === 'SmartShop' && (
             <>
-              <Text style={styles.suggestionReason}>
-                Bought {item.frequency} time{item.frequency === 1 ? '' : 's'} total
-              </Text>
-
-              {/* אופציונלי: להציג קנייה אחרונה */}
+             
               {item.lastBought && (
                 <Text style={styles.suggestionMeta}>
                   Last bought: {new Date(item.lastBought).toLocaleDateString()}
                 </Text>
               )}
-
               {item.favoriteCount > 0 && (
                 <Text
                   style={[
@@ -660,11 +624,8 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               )}
             </>
           )}
-
         </View>
-        {/* Action buttons with improved visual feedback */}
         <View style={styles.actionButtons}>
-          {/* Heart Icon for Favorites - show only on Favorites page */}
           {isFavoritesPage && (
             <TouchableOpacity
               style={{
@@ -694,9 +655,7 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               />
             </TouchableOpacity>
           )}
-
-          {/* Only show X button for smart suggestions, not for ALL tab */}
-          {selectedMainTab !== 'all' && (
+          {(selectedMainTab !== 'all' && selectedSmartTab === 'SmartShop') && (
             <TouchableOpacity
               style={styles.rejectButton}
               onPress={() => handleRejectSuggestion(item)}
@@ -736,34 +695,40 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
 
     const itemId = item.productId || item._id;
 
-    // Prevent multiple clicks
     if (addingItems.has(itemId)) {
       return;
     }
 
-    // Immediate optimistic updates for UI feedback
     setAddingItems(prev => new Set([...prev, itemId]));
-    // Don't update count optimistically - wait for real update
 
     try {
-      console.log('📤 Adding item to group shared list:', {
-        groupId,
-        itemName: item.name,
-        productId: item.productId || item._id,
-        barcode: item.barcode || ''
-      });
+      // 1. Fetch current items in group list
+      const res = await api.get(`/groups/${groupId}/list/items`);
+      const existing = res.data.find(
+        i => (i.productId || i._id) === itemId || i.name === item.name
+      );
+      console.log('Existing item in group list:', existing);
+      if (existing) {
+        // 2. If exists, PATCH to increase quantity
+        await api.patch(`/groups/${groupId}/list/items/${existing._id || existing.id || existing.productId}`, {
+          quantity: (existing.quantity || 1) + 1,
+          name: item.name,
+          icon: item.img,
+          productId: item.productId || item._id,
+          barcode: item.barcode || '',
+        });
+        showToast(`${item.name} quantity increased!`);
+      } else {
+        // 3. If not, POST to add new item
+        await api.post(`/groups/${groupId}/list/items`, {
+          name: item.name,
+          icon: item.img,
+          productId: item.productId || item._id,
+          barcode: item.barcode || '',
+        });
+        showToast(`${item.name} added to shared list!`);
+      }
 
-      // Make the API call
-      await api.post(`/groups/${groupId}/list/items`, {
-        name: item.name,
-        icon: item.img,
-        productId: item.productId || item._id,
-        barcode: item.barcode || '',
-      });
-
-      console.log('✅ Item added successfully to group shared list');
-
-      // Success - show visual confirmation
       setAddingItems(prev => {
         const newSet = new Set(prev);
         newSet.delete(itemId);
@@ -771,14 +736,8 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
       });
 
       setAddedItems(prev => new Set([...prev, itemId]));
-
-      // Refresh count to get accurate total
       fetchInitialCount();
 
-      // Show success toast
-      showToast(`${item.name} added to shared list!`);
-
-      // Reset the success state after 2 seconds
       setTimeout(() => {
         setAddedItems(prev => {
           const newSet = new Set(prev);
@@ -790,13 +749,11 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
     } catch (error) {
       console.error('Error adding to shared list:', error);
 
-      // Revert optimistic updates on error
       setAddingItems(prev => {
         const newSet = new Set(prev);
         newSet.delete(itemId);
         return newSet;
       });
-      // Refresh count to get accurate total
       fetchInitialCount();
 
       showToast('Failed to add item to shared list');
@@ -804,59 +761,23 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
   };
 
   const handleRejectSuggestion = async (item) => {
-    try {
-      // Track the rejection for ML training
-      await api.post('/rejections', {
-        productId: item.productId,
-        groupId: null // TODO: Get current group ID
-      });
+    const id = (item.productId || item._id)?.toString();
+    if (!id) {
+      showToast('Invalid product');
+      return;
+    }
 
-      // Remove from suggestions list
-      setSuggestions(prev => prev.filter(s => s.productId !== item.productId));
+    const prev = suggestions;
+    setSuggestions(curr => curr.filter(s => (s.productId || s._id)?.toString() !== id));
+
+    try {
+      await api.post('/rejections', { productId: id, groupId, barcode: item.barcode || '' });
       showToast(`${item.name} removed from suggestions`);
     } catch (error) {
       console.error('Error rejecting suggestion:', error);
+      setSuggestions(prev);
       showToast('Failed to reject suggestion');
     }
-  };
-
-  const handleCardPress = (category) => {
-    if (category === 'seasonal' || category === 'popular') {
-      showToast('Feature coming soon!');
-      return;
-    }
-    // Set the selected category and fetch data - stay within this screen
-    setSelectedCategory(category);
-    fetchSmartSuggestions(category, 0, true);
-  };
-
-  const renderSearchBar = () => {
-    if (selectedMainTab !== 'all') return null;
-
-    return (
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search products..."
-            placeholderTextColor="#999"
-            value={searchTerm}
-            onChangeText={setSearchTerm}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {searchTerm.length > 0 && (
-            <TouchableOpacity
-              style={styles.clearButton}
-              onPress={() => setSearchTerm('')}
-            >
-              <Ionicons name="close-circle" size={20} color="#666" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
   };
 
   const renderCategoryFilter = () => {
@@ -874,13 +795,19 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               ]}
               onPress={() => {
                 setSelectedMainTab(item.key);
-                // Reset sub-tab to default when main tab changes
                 setSelectedSmartTab('recent');
-                // Clear suggestions when switching to smart tab
                 if (item.key === 'smart') {
                   setSelectedSmartTab('recent');
                   setSuggestions([]);
+                  setFilteredSuggestions([]);
+                  setQuery('');
+                  setSearchVersion((v) => v + 1); // reset search input
                   fetchSmartSuggestions('recent');
+                } else {
+                  // switching back to ALL
+                  setFilteredSuggestions([]);
+                  setQuery('');
+                  setSearchVersion((v) => v + 1);
                 }
               }}
               activeOpacity={0.85}
@@ -912,7 +839,6 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
               ]}
               onPress={() => {
                 setSelectedSmartTab(item.key);
-                // Clear current suggestions and fetch new ones
                 setSuggestions([]);
                 setFilteredSuggestions([]);
                 fetchSmartSuggestions(item.key);
@@ -933,16 +859,13 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
 
   // Infinite scroll for ALL card - continuous bottom loading only
   const handleEndReached = () => {
-    console.log('📜 ALL card: End reached - loadingMore:', loadingMore, 'hasMore:', hasMore, 'searchTerm:', searchTerm.trim(), 'offset:', offset);
-
-    // Only fetch more if we're on ALL tab, not searching, not already loading more, and have more items
-    if (selectedMainTab === 'all' && !loadingMore && hasMore && !searchTerm.trim()) {
+    console.log('📜 ALL card: End reached - loadingMore:', loadingMore, 'hasMore:', hasMore, 'query:', query.trim(), 'offset:', offset);
+    if (selectedMainTab === 'all' && !loadingMore && hasMore && !query.trim()) {
       console.log('📜 ALL card: Loading fresh products from bottom...');
-      // Load immediately when reaching the end - no delay for smoother experience
       fetchSmartSuggestions('all', offset, false);
     } else if (selectedMainTab !== 'all') {
       console.log('📜 ALL card: Skipping pagination - not on ALL tab');
-    } else if (searchTerm.trim()) {
+    } else if (query.trim()) {
       console.log('📜 ALL card: Skipping pagination - currently searching');
     } else if (loadingMore) {
       console.log('📜 ALL card: Skipping pagination - already loading more');
@@ -962,10 +885,8 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
     );
   }
 
-  // Show empty state if no suggestions
   if (!loading && suggestions.length === 0) {
     if (selectedMainTab === 'all') {
-      // Empty state for ALL tab
       return (
         <View style={styles.loadingContainer}>
           <Ionicons name="bulb-outline" size={48} color="#bbb" style={{ marginBottom: 12 }} />
@@ -998,15 +919,25 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
           </TouchableOpacity>
         </View>
       </View>
-      {/* Render the horizontal tabbed category filter */}
+
+      {/* Tabs */}
       {renderCategoryFilter()}
-      {/* Render search bar for ALL category */}
-      {renderSearchBar()}
-      {/* Render smart sub-category filter only when Smart Suggestions tab is selected */}
+
+      {/* Search (ALL only) – memoized with local state; only this and the list re-render on input */}
+      {selectedMainTab === 'all' ? (
+        <SearchBar
+          key={searchVersion}
+          onDebouncedChange={setQuery}
+          loading={searchLoading}
+        />
+      ) : null}
+
+      {/* Smart sub-tabs */}
       {selectedMainTab === 'smart' && renderSmartSubCategoryFilter()}
-      {/* Product suggestions list below the tabs */}
+
+      {/* Product suggestions list */}
       <FlatList
-        data={selectedMainTab === 'all' ? (searchTerm.trim() ? filteredSuggestions : suggestions) : suggestions}
+        data={selectedMainTab === 'all' ? (query.trim() ? filteredSuggestions : suggestions) : suggestions}
         keyExtractor={(item, index) => `${item._id || item.productId}_${index}`}
         renderItem={renderSuggestion}
         contentContainerStyle={{ padding: 16, paddingBottom: 60 }}
@@ -1029,15 +960,15 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
                     Favorite items from the ALL card to see them here.
                   </Text>
                 </>
-              ) : selectedMainTab === 'smart' && selectedSmartTab === 'frequent' ? (
+              ) : selectedMainTab === 'smart' && selectedSmartTab === 'SmartShop' ? (
                 <>
                   <Ionicons name="construct-outline" size={48} color="#bbb" style={{ marginBottom: 12 }} />
-                  <Text style={styles.loadingText}>No frequent items yet!</Text>
+                  <Text style={styles.loadingText}>No SmartShop items yet!</Text>
                   <Text style={{ color: '#888', textAlign: 'center', marginTop: 8 }}>
-                    Try adding more items to your shopping list to see frequent ones here.
+                    Try adding more items to your shopping list to see SmartShop ones here.
                   </Text>
                 </>
-              ) : selectedMainTab === 'all' && searchTerm.trim() ? (
+              ) : selectedMainTab === 'all' && query.trim() ? (
                 <>
                   <Ionicons name="search-outline" size={48} color="#bbb" style={{ marginBottom: 12 }} />
                   <Text style={styles.loadingText}>No products found</Text>
@@ -1062,7 +993,7 @@ const isFavoritesPage = selectedMainTab === 'smart' && selectedSmartTab === 'fav
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
-          loadingMore && !searchTerm.trim() && selectedMainTab === 'all' ? (
+          loadingMore && !query.trim() && selectedMainTab === 'all' ? (
             <View style={styles.loadingFooter}>
               <ActivityIndicator size="small" color="#2E7D32" />
               <Text style={styles.loadingFooterText}>Loading new products...</Text>
@@ -1459,4 +1390,4 @@ const styles = StyleSheet.create({
 
 });
 
-export default SmartSuggestionsScreen; 
+export default SmartSuggestionsScreen;

@@ -17,13 +17,13 @@ router.post('/',      auth, ctl.createList);
 router.put('/:id', auth, ctl.updateList); 
 
 // Delete list
-router.delete('/:id', auth, ctl.deleteList);
+//router.delete('/:id', auth, ctl.deleteList);
 
 // Add item to a list
 router.post('/:id/items', auth, ctl.addItemToList);
 
 // Add item to a list by product ID
-router.post('/:id/items/:productId', auth, ctl.addItemToListById);
+//router.post('/:id/items/:productId', auth, ctl.addItemToListById);
 
 // Delete item from list
 router.delete('/:id/items/:itemId', auth, ctl.deleteItemById); 

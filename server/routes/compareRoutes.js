@@ -4,8 +4,7 @@ const router = express.Router();
 const List = require('../models/List');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const StorePriceCache = require('../models/StorePriceCache');
-const { getDistances } = require('../services/distance');
+
 
 // Add in-memory cache for better performance
 const priceCache = new Map();
@@ -359,7 +358,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// MILESTONE 4: POST /api/compare/price
+//  POST /api/compare/price
 // Body: { city: string, products: [{ barcode: string, name: string, quantity: number }] }
 router.post('/price', async (req, res) => {
   try {
@@ -384,7 +383,6 @@ router.post('/price', async (req, res) => {
 
     for (const prod of uniqueProductData) {
       try {
-
 
         const prodResults = await searchProductWithFallback(city, prod);
         await sleep(3000);
@@ -565,14 +563,14 @@ router.post('/price', async (req, res) => {
     const storeAddresses = aggregated.map(s => s.address);
     let distances = {};
     try {
-      distances = await getDistances(city, storeAddresses);
+      //distances = await getDistances(city, storeAddresses);
     } catch (distErr) {
       console.error('[compare POST /price] Distance API error:', distErr);
     }
     aggregated.forEach(s => {
       s.distance = distances[s.address] || null;
     });
-    res.json(aggregated.slice(0, 5));
+    res.json(aggregated.slice(0, 5)); // Return top 5 stores only
   } catch (err) {
     console.error('[compare POST /price] error', err);
     res.status(500).json({ error: 'An unexpected server error occurred. Please try again later.' });

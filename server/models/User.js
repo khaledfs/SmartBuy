@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, unique: true, trim: true },
     phone:    { type: String, required: true, unique: true, trim: true },
     password: { type: String, required: true },
-    profilePicUrl: { type: String, default: '' } // ✅ New field
+    profilePicUrl: { type: String, default: '' } 
   },
   { timestamps: true }
 );

@@ -5,7 +5,7 @@ import LottieView from 'lottie-react-native';
 export default function TransitionScreenPersonal({ navigation }) {
   useEffect(() => {
     const timer = setTimeout(() => {
-      navigation.replace('MyList');
+      navigation.pop(1);
     }, 2500); // Adjust duration to match animation
     return () => clearTimeout(timer);
   }, [navigation]);
