@@ -115,6 +115,22 @@ router.delete('/:groupId/list/items/:itemId', auth, async (req, res) => {
   }
 });
 
+// PATCH /groups/:groupId/list/items/:itemId
+router.patch('/:groupId/list/items/:itemId', auth, async (req, res) => {
+  // Update item quantity in a group's shared list
+  try {
+    const Group = require('../models/Group');
+    const group = await Group.findById(req.params.groupId).populate('list');
+    if (!group || !group.list) {
+      return res.status(404).json({ message: 'Group or shared list not found' });
+    }
+    req.params.id = group.list._id; // set listId for controller
+    return listController.updateItemQty(req, res);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.stack });
+  }
+});
+
 // Group shared list summary (current, last bought, trip count)
 router.get('/:groupId/list/summary', auth, groupListController.getGroupListSummary);
 // Complete a group trip (move current list to history, clear list)
