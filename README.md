@@ -133,7 +133,7 @@ SmartBuy/
 - Implement barcode scanning
 - Add offline mode support
 - Add push notifications
-- Machine learning-based predictions
+
 
 ## Contact
 For questions or support, contact the development team.
