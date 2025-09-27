@@ -28,8 +28,6 @@ const saveJSON = async (key, value) => {
     }
 };
 
-// Helper to deeply clone an array of items (to avoid mutation issues)
-const cloneItems = (items) => (Array.isArray(items) ? items.map(i => ({ ...i })) : []);
 
 export const PersonalListProvider = ({ children }) => {
   const [personalList, setPersonalList] = useState([]);  // The user's personal shopping list    
@@ -66,7 +64,7 @@ export const PersonalListProvider = ({ children }) => {
     })();
   }, []);
 
-  // --- שמירה אוטומטית כשסטייט משתנה ---
+// Save to AsyncStorage on changes (after initial load)
   useEffect(() => {
     if (!hydratedRef.current) return;
     saveJSON(KEYS.PERSONAL_LIST, personalList);
@@ -133,6 +131,7 @@ const completeTrip = (storeInfo, boughtProducts = []) => {
   } else {
     // No bought items reported → do NOT clear the list
     // (Optionally: show a toast/snackbar saying "No items were purchased")
+    
   }
 };
 
