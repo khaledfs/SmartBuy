@@ -23,7 +23,7 @@ function toIdStr(x) {
 async function extractFeaturesForProducts(productIds, userId, groupId = null) {
   const featuresMap = new Map();
   const productIdStrs = productIds.map(toIdStr);
-
+  console.log("extractFeaturesForProducts", productIdStrs, userId, groupId);
   // Init defaults
   for (const pid of productIdStrs) {
     featuresMap.set(pid, {
@@ -45,7 +45,15 @@ async function extractFeaturesForProducts(productIds, userId, groupId = null) {
     ]
   };
 
-  const favorites = await Favorite.find(favQuery).lean().catch(() => []);
+  // Run both queries in parallel
+  const [favorites, freqDocs] = await Promise.all([
+    Favorite.find(favQuery).lean().catch(() => []),
+    ProductFreq.find({
+      product: { $in: productIds },
+      group: groupId ?? null,
+    }).select('product totaladded lastAdded addedgap totoalrejected').lean()
+  ]);
+
   for (const fav of favorites) {
     const pidStr = toIdStr(fav.productId);
     if (featuresMap.has(pidStr)) {
@@ -53,17 +61,13 @@ async function extractFeaturesForProducts(productIds, userId, groupId = null) {
     }
   }
 
-  const freqDocs = await ProductFreq.find({
-    product: { $in: productIds },
-    group: groupId ?? null,
-  }).select('product totaladded lastAdded addedgap').lean();
-
   const now = Date.now();
   for (const doc of freqDocs) {
     const pidStr = toIdStr(doc.product);
     if (!featuresMap.has(pidStr)) continue;
 
     const feats = featuresMap.get(pidStr);
+
     const total = doc.totaladded || 0;
     feats.addedBefore = total > 0 ? 1 : 0;
     feats.timesAdded = total;
@@ -72,7 +76,7 @@ async function extractFeaturesForProducts(productIds, userId, groupId = null) {
     feats.recentlyadded = lastAdded && (now - lastAdded) <= THIRTY_DAYS_MS ? 1 : 0;
 
     feats.AddedFrequency = doc.addedgap;
-    feats.timesRejected = doc.timesRejected
+    feats.timesRejected = doc.totoalrejected
   }
   return featuresMap;
 }
