@@ -5,7 +5,6 @@ import { getSocket } from './socket';
 const getSocketInstance = () => {
   const socket = getSocket();
   if (!socket) {
-    console.warn('⚠️ Socket not initialized. Call initializeSocket() first.');
     return null;
   }
   return socket;
