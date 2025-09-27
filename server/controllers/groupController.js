@@ -4,7 +4,6 @@ const List = require('../models/List');
 
 // POST /groups
 exports.createGroup = async (req, res) => {
-  console.log('Received group creation request:', req.body);
   const { name, members = [] } = req.body;
   if (!name) return res.status(400).json({ message: 'Group name is required' });
 
