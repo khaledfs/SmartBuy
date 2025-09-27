@@ -40,7 +40,6 @@ const useProductJson = () => {
     if (cache.current) return cache.current;
     setLoading(true);
     try {
-      console.log("askdoaskdasokdaoskdasokdasokdoaskdoaskdoaskdoaskdoaskdoas")
       const response = await fetch(require('../assets/product.json'));
       const data = await response.json();
       cache.current = data;
@@ -97,8 +96,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
   const [selectedMainTab, setSelectedMainTab] = useState('all');
   const [selectedSmartTab, setSelectedSmartTab] = useState('recent');
   const [favorites, setFavorites] = useState(new Set());
-  const [showFavoritesModal, setShowFavoritesModal] = useState(false);
-  const [favoriteItems, setFavoriteItems] = useState([]);
+
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [addedItemsCount, setAddedItemsCount] = useState(0);
@@ -608,9 +606,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
           )}
           {item.type === 'SmartShop' && (
             <>
-              <Text style={styles.suggestionReason}>
-                Bought {item.frequency} time{item.frequency === 1 ? '' : 's'} total
-              </Text>
+             
               {item.lastBought && (
                 <Text style={styles.suggestionMeta}>
                   Last bought: {new Date(item.lastBought).toLocaleDateString()}
@@ -659,7 +655,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
               />
             </TouchableOpacity>
           )}
-          {(selectedMainTab !== 'all' && selectedSmartTab === 'SmartShop') &&(
+          {(selectedMainTab !== 'all' && selectedSmartTab === 'SmartShop') && (
             <TouchableOpacity
               style={styles.rejectButton}
               onPress={() => handleRejectSuggestion(item)}
@@ -706,21 +702,32 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
     setAddingItems(prev => new Set([...prev, itemId]));
 
     try {
-      console.log('📤 Adding item to group shared list:', {
-        groupId,
-        itemName: item.name,
-        productId: item.productId || item._id,
-        barcode: item.barcode || ''
-      });
-
-      await api.post(`/groups/${groupId}/list/items`, {
-        name: item.name,
-        icon: item.img,
-        productId: item.productId || item._id,
-        barcode: item.barcode || '',
-      });
-
-      console.log('✅ Item added successfully to group shared list');
+      // 1. Fetch current items in group list
+      const res = await api.get(`/groups/${groupId}/list/items`);
+      const existing = res.data.find(
+        i => (i.productId || i._id) === itemId || i.name === item.name
+      );
+      console.log('Existing item in group list:', existing);
+      if (existing) {
+        // 2. If exists, PATCH to increase quantity
+        await api.patch(`/groups/${groupId}/list/items/${existing._id || existing.id || existing.productId}`, {
+          quantity: (existing.quantity || 1) + 1,
+          name: item.name,
+          icon: item.img,
+          productId: item.productId || item._id,
+          barcode: item.barcode || '',
+        });
+        showToast(`${item.name} quantity increased!`);
+      } else {
+        // 3. If not, POST to add new item
+        await api.post(`/groups/${groupId}/list/items`, {
+          name: item.name,
+          icon: item.img,
+          productId: item.productId || item._id,
+          barcode: item.barcode || '',
+        });
+        showToast(`${item.name} added to shared list!`);
+      }
 
       setAddingItems(prev => {
         const newSet = new Set(prev);
@@ -730,7 +737,6 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
 
       setAddedItems(prev => new Set([...prev, itemId]));
       fetchInitialCount();
-      showToast(`${item.name} added to shared list!`);
 
       setTimeout(() => {
         setAddedItems(prev => {
@@ -765,7 +771,7 @@ const SmartSuggestionsScreen = ({ navigation, route }) => {
     setSuggestions(curr => curr.filter(s => (s.productId || s._id)?.toString() !== id));
 
     try {
-      await api.post('/rejections', { productId: id, groupId });
+      await api.post('/rejections', { productId: id, groupId, barcode: item.barcode || '' });
       showToast(`${item.name} removed from suggestions`);
     } catch (error) {
       console.error('Error rejecting suggestion:', error);
