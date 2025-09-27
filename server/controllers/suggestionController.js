@@ -3,10 +3,18 @@ const ProductFreq = require('../models/ProductFreq');
 const ProductHistory = require('../models/ProductHistory');
 const UserFavorites = require('../models/UserFavorites');
 const RejectedProduct = require('../models/RejectedProduct');
+const Suggestsmart = require('../models/Suggestsmart');
+const { rankProducts } = require('../services/ml/predictPurchases')
 const { Types } = require('mongoose');
 const IntelligentFrequencyService = require('../services/intelligentFrequency');
 const fs = require('fs');
 const path = require('path');
+
+const { extractFeaturesForProduct } = require('../services/ml/features');
+
+const PurchaseHistory = require('../models/PurchaseHistory');
+const Group = require('../models/Group');
+
 
 // Simple cache for products.json
 let productsCache = null;
@@ -15,7 +23,7 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Cache for smart suggestions
 let suggestionsCache = new Map();
-const SUGGESTIONS_CACHE_DURATION = 1 * 3 * 1000; 
+const SUGGESTIONS_CACHE_DURATION = 0;
 
 // Function to clear cache for a specific user/group
 function clearSuggestionsCache(userId, groupId) {
@@ -39,6 +47,44 @@ function getValidImage(img) {
   }
   return 'https://via.placeholder.com/100';
 }
+
+async function getTopRankedItems(groupId, userId, limit = 20) {
+  // Get top products
+  const topAllTime = await getTopProductsAllTime(limit);
+  const topRecent = await getRec(groupId, limit);
+  const topFavorites = await getFavorites(groupId, limit);
+
+  // Merge all items into one map by productId to avoid duplicates
+  const mergedMap = new Map();
+  [...topAllTime, ...topRecent, ...topFavorites].forEach(product => {
+    if (!mergedMap.has(product.productId.toString())) {
+      mergedMap.set(product.productId.toString(), product);
+    }
+  });
+  // Extract features and prepare for ranking
+  const productFeatureMap = new Map();
+  // For each unique product, extract features
+  for (const [productId, product] of mergedMap.entries()) {
+
+    const features = await extractFeaturesForProduct(productId, userId, groupId);
+
+    productFeatureMap.set(productId, {
+      ...product,
+      bias: 1,
+      isFavorite: features.isFavorite || 0,
+      addedBefore: features.addedBefore || 0,
+      timesAdded: features.timesAdded || 0,
+      recentlyadded: features.recentlyadded || 0,
+      AddedFrequency: features.AddedFrequency || 0,
+      timesRejected: features.timesRejected || 0,
+    });
+  }
+
+  const rankedProducts = await rankProducts(productFeatureMap);
+
+  return rankedProducts.slice(0, limit); // Return only top 'limit' products
+}
+
 
 async function getTopProductsAllTime(limit = 20) {
   try {
@@ -93,6 +139,176 @@ async function getTopProductsAllTime(limit = 20) {
   }
 }
 
+
+async function getSuggestions(groupId, userId, limitNum = 20) {
+  const oneDayAgo = new Date();
+  oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+  let suggestion = await Suggestsmart.findOne({ group: groupId });
+
+  if (!suggestion || suggestion.suggestedAt < oneDayAgo || suggestion.products.length === 0) {
+    const newProducts = await getTopRankedItems(groupId, userId, limitNum);
+
+    const productsToSave = newProducts.map(p => ({
+      product: p.productId
+    }));
+    if (!suggestion) {
+      suggestion = new Suggestsmart({
+        group: groupId,
+        products: productsToSave
+      });
+    } else {
+      suggestion.products = productsToSave;
+      suggestion.suggestedAt = new Date();
+    }
+
+    await suggestion.save();
+
+    return newProducts.map(p => ({
+      productId: p.productId,
+      name: p.name,
+      img: p.img,
+      barcode: p.barcode,
+      type: "SmartShop"
+    }));
+  } else {
+
+    await suggestion.populate('products.product');
+
+    return suggestion.products.map(p => ({
+      productId: p.product._id,
+      name: p.product.name,
+      img: p.product.img,
+      barcode: p.product.barcode,
+      type: "SmartShop"
+    }));
+  }
+}
+async function getRec(groupId, limit = 20) {
+  const limitNum = parseInt(limit, 10) || 20;
+  try {
+    const group = await Group.findById(groupId).lean();
+    if (!group) return [];
+
+    const recentItems = await PurchaseHistory.aggregate([
+      { $match: { group: group._id } },
+      { $sort: { boughtAt: -1 } },
+      { $limit: 1 },
+      {
+        $lookup: {
+          from: 'purchasehistories',
+          let: { lastBoughtAt: '$boughtAt' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$group', group._id] },
+                    { $eq: ['$boughtAt', '$$lastBoughtAt'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: limitNum }
+          ],
+          as: 'recentItems'
+        }
+      },
+      { $unwind: '$recentItems' },
+      { $replaceRoot: { newRoot: '$recentItems' } },
+      {
+        $addFields: {
+          productObjId: {
+            $cond: [
+              { $eq: [{ $type: '$product' }, 'string'] },
+              { $toObjectId: '$product' },
+              '$product'
+            ]
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          let: { pid: '$productObjId', pname: { $ifNull: ['$name', null] } },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $and: [{ $ne: ['$$pid', null] }, { $eq: ['$_id', '$$pid'] }] },
+                    {
+                      $and: [
+                        { $ne: ['$$pname', null] },
+                        { $eq: [{ $toLower: '$name' }, { $toLower: '$$pname' }] }
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            { $project: { _id: 1, name: 1, img: 1, barcode: 1 } },
+            { $limit: 1 }
+          ],
+          as: 'productDetails'
+        }
+      },
+      { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          productId: {
+            $ifNull: ['$productDetails._id', { $ifNull: ['$productObjId', '$product'] }]
+          },
+          name: { $ifNull: ['$name', '$productDetails.name'] },
+          img: { $ifNull: ['$img', '$productDetails.img'] },
+          barcode: '$productDetails.barcode',
+          quantity: { $ifNull: ['$quantity', 1] },
+          boughtAt: '$boughtAt',
+          type: { $literal: 'recent' }
+        }
+      }
+    ]);
+
+    return recentItems
+      .filter(item => item.name && getValidImage(item.img) && item.img !== 'https://via.placeholder.com/100')
+      .map(item => ({
+        ...item,
+        img: getValidImage(item.img),
+        tripDate: new Date(item.boughtAt).toLocaleDateString()
+      }));
+  } catch (error) {
+    console.error('Error fetching recent items:', error);
+    return [];
+  }
+}
+
+// Get favorite products for a group, limit default 20
+async function getFavorites(groupId, limit = 20) {
+  const limitNum = parseInt(limit, 10) || 20;
+
+  try {
+    const group = await Group.findById(groupId).lean();
+    if (!group) return [];
+
+    const groupFavorites = await UserFavorites.find({ groupId: group._id }).limit(limitNum);
+    if (!groupFavorites.length) return [];
+
+    const productIds = groupFavorites.map(fav => fav.productId);
+    const products = await Product.find({ _id: { $in: productIds } });
+
+    return products.map(product => ({
+      productId: product._id,
+      name: product.name || 'Unknown Product',
+      img: getValidImage(product.img),
+      barcode: product.barcode || '',
+      type: 'favorite'
+    }));
+  } catch (error) {
+    console.error('Error fetching favorite items:', error);
+    return [];
+  }
+}
 // Get smart suggestions - OPTIMIZED VERSION with caching
 exports.getSmartSuggestions = async (req, res) => {
   try {
@@ -186,199 +402,11 @@ exports.getSmartSuggestions = async (req, res) => {
         score: 1,
         frequency: 1
       }));
-      suggestions.map(s => console.log(s.productId + " " + s.name + " " + s.img + " " + s.type + " " + s.score + " " + s.frequency))
+      suggestions.map(s => console.log(s.productId + " " + s.name + " " + " " + s.type + " " + s.score + " " + s.frequency))
     } else if (type === 'recent') {
-      // OPTIMIZED RECENT: Use aggregation pipeline for better performance
-      const Group = require('../models/Group');
-      const PurchaseHistory = require('../models/PurchaseHistory');
-
-      try {
-        // Check if group exists first
-        const group = await Group.findById(groupId).lean();
-        if (!group) {
-          suggestions = [];
-        } else {
-          // Use aggregation to get recent items with product details in one query
-          const recentItems = await PurchaseHistory.aggregate([
-            { $match: { group: group._id } },
-            { $sort: { boughtAt: -1 } },
-            { $limit: 1 },
-
-            {
-              $lookup: {
-                from: 'purchasehistories',
-                let: { lastBoughtAt: '$boughtAt' },
-                pipeline: [
-                  {
-                    $match: {
-                      $expr: {
-                        $and: [
-                          { $eq: ['$group', group._id] },
-                          { $eq: ['$boughtAt', '$$lastBoughtAt'] }
-                        ]
-                      }
-                    }
-                  },
-                  { $sort: { createdAt: -1 } },
-                  { $limit: limitNum }
-                ],
-                as: 'recentItems'
-              }
-            },
-            { $unwind: '$recentItems' },
-            { $replaceRoot: { newRoot: '$recentItems' } },
-
-            // cast product -> ObjectId if it is a string; leave as-is if already ObjectId
-            {
-              $addFields: {
-                productObjId: {
-                  $cond: [
-                    { $eq: [{ $type: '$product' }, 'string'] },
-                    { $toObjectId: '$product' },
-                    '$product'
-                  ]
-                }
-              }
-            },
-
-            {
-              $lookup: {
-                from: 'products',
-                let: {
-                  pid: '$productObjId',
-                  pname: { $ifNull: ['$name', null] }
-                },
-                pipeline: [
-                  {
-                    $match: {
-                      $expr: {
-                        $or: [
-                          { $and: [{ $ne: ['$$pid', null] }, { $eq: ['$_id', '$$pid'] }] },
-                          {
-                            $and: [
-                              { $ne: ['$$pname', null] },
-                              { $eq: [{ $toLower: '$name' }, { $toLower: '$$pname' }] }
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  },
-                  { $project: { _id: 1, name: 1, img: 1, barcode: 1 } },
-                  { $limit: 1 }
-                ],
-                as: 'productDetails'
-              }
-            },
-            { $unwind: { path: '$productDetails', preserveNullAndEmptyArrays: true } },
-            {
-              $project: {
-                productId: {
-                  $ifNull: [
-                    '$productDetails._id',
-                    { $ifNull: ['$productObjId', '$product'] } // fallback
-                  ]
-                },
-                name: { $ifNull: ['$name', '$productDetails.name'] },
-                img: { $ifNull: ['$img', '$productDetails.img'] },
-                barcode: '$productDetails.barcode',
-                quantity: { $ifNull: ['$quantity', 1] },
-                boughtAt: '$boughtAt',
-                type: { $literal: 'recent' }
-              }
-            }
-          ]);
-
-          recentItems.map(item => console.log(item._id + " " + item.name + "  asdasdasdasdasdasdas"))
-          suggestions = recentItems
-            .filter(item => item.name && getValidImage(item.img) && item.img !== 'https://via.placeholder.com/100')
-            .map(item => ({
-              ...item,
-              img: getValidImage(item.img),
-              tripDate: new Date(item.boughtAt).toLocaleDateString()
-            }));
-        }
-      } catch (error) {
-        console.error('Error fetching recent items:', error);
-        // Fallback to random products if recent fails
-        const products = await Product.aggregate([
-          { $sample: { size: limitNum } },
-          { $project: { _id: 1, name: 1, img: 1, barcode: 1 } }
-        ]);
-        suggestions = products.map(product => ({
-          productId: product._id,
-          name: product.name || 'Unknown Product',
-          img: getValidImage(product.img),
-          barcode: product.barcode || '',
-          type: 'recent',
-          quantity: 1,
-          boughtAt: new Date(),
-          tripDate: new Date().toLocaleDateString()
-        }));
-      }
+      suggestions = await getRec(groupId);
     } else if (type === 'favorite') {
-      // OPTIMIZED FAVORITE: Use aggregation for better performance
-      const Group = require('../models/Group');
-
-
-      try {
-        const group = await Group.findById(groupId).lean();
-        if (!group) {
-          // Fallback: random products from MongoDB
-          const products = await Product.aggregate([
-            { $sample: { size: limitNum } },
-            { $project: { _id: 1, name: 1, img: 1, barcode: 1 } }
-          ]);
-          suggestions = products.map(product => ({
-            productId: product._id,
-            name: product.name || 'Unknown Product',
-            img: getValidImage(product.img),
-            barcode: product.barcode || '',
-            type: 'favorite'
-          }));
-        } else {
-          // Get favorites for ALL group members - GROUP-BASED APPROACH
-          const groupFavorites = await UserFavorites.find({
-            groupId: group._id
-          }).limit(limitNum);
-
-
-          if (groupFavorites.length === 0) {
-            suggestions = [];
-          } else {
-            // Get product IDs from favorites
-            const productIds = groupFavorites.map(fav => fav.productId);
-
-            // Fetch products directly
-            const products = await Product.find({ _id: { $in: productIds } });
-
-            // Map to suggestions format
-            suggestions = products.map(product => ({
-              productId: product._id,
-              name: product.name || 'Unknown Product',
-              img: getValidImage(product.img),
-              barcode: product.barcode || '',
-              type: 'favorite'
-            }));
-          }
-
-          console.log('Final suggestions count:', suggestions.length);
-        }
-      } catch (error) {
-        console.error('Error fetching favorite items:', error);
-        // Fallback to random products if favorites fail
-        const products = await Product.aggregate([
-          { $sample: { size: limitNum } },
-          { $project: { _id: 1, name: 1, img: 1, barcode: 1 } }
-        ]);
-        suggestions = products.map(product => ({
-          productId: product._id,
-          name: product.name || 'Unknown Product',
-          img: getValidImage(product.img),
-          barcode: product.barcode || '',
-          type: 'favorite'
-        }));
-      }
+      suggestions = await getFavorites(groupId);
     } else if (type === 'SmartShop') {
       const Group = require('../models/Group');
       const PurchaseHistory = require('../models/PurchaseHistory');
@@ -389,11 +417,11 @@ exports.getSmartSuggestions = async (req, res) => {
         if (!group) {
           suggestions = [];
         } else {
-          console.log('asdsadFetching SmartShop suggestions for group:', groupId);
-          suggestions = await getTopProductsAllTime(limitNum);
+
+          suggestions = await getSuggestions(groupId, userId);
         }
       } catch (error) {
-        console.error('Error fetching frequent items:', error);
+        console.error('Error fetching smart items:', error);
         suggestions = [];
       }
     } else {
@@ -425,350 +453,12 @@ exports.getSmartSuggestions = async (req, res) => {
   }
 };
 
-// Fallback function for user-based suggestions (when no group available)
-async function getUserBasedSuggestions(req, res) {
-  try {
-    const userId = req.user.id;
-    const limit = parseInt(req.query.limit) || 20;
 
-    // Get user's recent and favorite products
-    const [recentProducts, favoriteProducts, frequentProducts] = await Promise.all([
-      getRecentlyAddedProducts(userId, Math.ceil(limit / 3)),
-      getFavoriteProducts(userId, Math.ceil(limit / 3)),
-      getBasicFrequentProducts(userId, Math.ceil(limit / 3))
-    ]);
 
-    const suggestions = [...recentProducts, ...favoriteProducts, ...frequentProducts];
 
-    res.json({
-      success: true,
-      suggestions: suggestions.slice(0, limit)
-    });
 
-  } catch (error) {
-    console.error('Error getting user-based suggestions:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get user-based suggestions'
-    });
-  }
-}
 
-// Get household frequent products (BLAZING FAST: SmartCart-style simple aggregation)
-async function getHouseholdFrequentProducts(groupId, limit) {
-  try {
-    // ULTRA FAST: Check cache first
-    const cached = getCachedFrequent(groupId);
-    if (cached) {
-      return cached.slice(0, limit);
-    }
 
-    const Group = require('../models/Group');
-    const ProductHistory = require('../models/ProductHistory');
-
-    const group = await Group.findById(groupId);
-    if (!group) return await getRandomProducts(limit);
-
-    const memberIds = group.members.map(m => m.user);
-
-    // ULTRA FAST: SmartCart-style aggregation - count purchases by frequency
-    const frequentByTimes = await ProductHistory.aggregate([
-      {
-        $match: {
-          userId: { $in: memberIds },
-          action: { $in: ['added', 'purchased'] }
-        }
-      },
-      {
-        $group: {
-          _id: '$productId',
-          timesPurchased: { $sum: 1 },
-          totalQuantity: { $sum: '$quantity' },
-          lastPurchase: { $max: '$createdAt' }
-        }
-      },
-      { $sort: { timesPurchased: -1, totalQuantity: -1 } },
-      { $limit: limit }
-    ]);
-
-    if (!frequentByTimes.length) {
-      const fallback = await getRandomProducts(limit);
-      setCachedFrequent(groupId, fallback);
-      return fallback;
-    }
-
-    // Get product details from MongoDB instead of old products.json
-    const productIds = frequentByTimes.map(item => item._id);
-    const products = await Product.find({ _id: { $in: productIds } }).select('name img').lean();
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    // ULTRA FAST: Simple mapping with SmartCart-style data
-    const results = frequentByTimes.map(item => {
-      const prod = productMap.get(item._id.toString());
-
-      return {
-        productId: item._id,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'frequent',
-        timesPurchased: item.timesPurchased,
-        totalQuantity: item.totalQuantity,
-        lastPurchase: item.lastPurchase,
-        frequency: item.timesPurchased,
-        score: item.timesPurchased * item.totalQuantity // SmartCart-style scoring
-      };
-    });
-
-    // ULTRA FAST: Cache results
-    setCachedFrequent(groupId, results);
-    return results;
-
-  } catch (error) {
-    console.error('[frequent] Error:', error.message);
-    return await getRandomProducts(limit);
-  }
-}
-
-// Get all products (for ALL card) - fetch from Product collection in the database
-async function getAllProducts(limit = 20) {
-  try {
-    // Use MongoDB $sample for true random fast batches, only return essential fields
-    const products = await Product.aggregate([
-      { $sample: { size: limit } },
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          img: 1
-        }
-      }
-    ]);
-
-    // Return empty array if no products found (no fallback to old file)
-    if (!products.length) {
-      console.log('⚠️ No products found in MongoDB for ALL card');
-      return [];
-    }
-
-    return products.map(product => ({
-      productId: product._id,
-      name: product.name || 'Unknown Product',
-      img: getValidImage(product.img),
-      type: 'all',
-      score: 1,
-      frequency: 1
-    }));
-  } catch (error) {
-    console.error('❌ Error getting all products from MongoDB:', error);
-    // Return empty array instead of falling back to old file
-    return [];
-  }
-}
-
-// Fallback function for basic frequency (when no intelligent data exists)
-async function getBasicFrequentProducts(userId, limit) {
-  try {
-    const ProductHistory = require('../models/ProductHistory');
-    const Product = require('../models/Product');
-
-    // Get user's purchase history
-    const purchaseHistory = await ProductHistory.find({
-      userId,
-      action: { $in: ['purchased', 'added'] }
-    })
-      .sort({ createdAt: -1 })
-      .limit(100)
-      .lean();
-
-    if (!purchaseHistory.length) {
-      return await getRandomProducts(limit);
-    }
-
-    // Count frequency of each product
-    const productCounts = {};
-    purchaseHistory.forEach(record => {
-      const productId = record.productId.toString();
-      if (!productCounts[productId]) {
-        productCounts[productId] = {
-          count: 0,
-          lastPurchase: record.createdAt
-        };
-      }
-      productCounts[productId].count++;
-    });
-
-    // Sort by frequency and get top products
-    const sortedProducts = Object.entries(productCounts)
-      .sort(([, a], [, b]) => b.count - a.count)
-      .slice(0, limit)
-      .map(([productId, data]) => ({
-        productId,
-        frequency: data.count,
-        lastPurchase: data.lastPurchase
-      }));
-
-    if (!sortedProducts.length) {
-      return await getRandomProducts(limit);
-    }
-
-    // Get product details
-    const productIds = sortedProducts.map(p => p.productId);
-    const products = await Product.find({
-      _id: { $in: productIds }
-    }).select('name img').lean();
-
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    return sortedProducts.map(item => {
-      const prod = productMap.get(item.productId);
-      return {
-        productId: item.productId,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'frequent',
-        frequency: item.frequency,
-        lastPurchase: item.lastPurchase
-      };
-    });
-
-  } catch (error) {
-    console.error('Error getting basic frequent products:', error);
-    return await getRandomProducts(limit);
-  }
-}
-
-// Get recently added products for a user
-async function getRecentlyAddedProducts(userId, limit) {
-  try {
-    const ProductHistory = require('../models/ProductHistory');
-    const Product = require('../models/Product');
-
-    const recentProducts = await ProductHistory.find({
-      userId,
-      action: { $in: ['added', 'purchased'] }
-    })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
-
-    if (!recentProducts.length) {
-      return await getRandomProducts(limit);
-    }
-
-    // Get unique products
-    const uniqueProducts = [];
-    const seen = new Set();
-
-    for (const record of recentProducts) {
-      const productId = record.productId.toString();
-      if (!seen.has(productId)) {
-        seen.add(productId);
-        uniqueProducts.push({
-          productId,
-          lastAdded: record.createdAt
-        });
-      }
-    }
-
-    // Get product details
-    const productIds = uniqueProducts.map(p => p.productId);
-    const products = await Product.find({
-      _id: { $in: productIds }
-    }).select('name img').lean();
-
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    return uniqueProducts.map(item => {
-      const prod = productMap.get(item.productId);
-      return {
-        productId: item.productId,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'recent',
-        lastAdded: item.lastAdded
-      };
-    });
-
-  } catch (error) {
-    console.error('Error getting recently added products:', error);
-    return await getRandomProducts(limit);
-  }
-}
-
-// Get random products from the Product collection (FAST: MongoDB $sample)
-async function getRandomProducts(limit) {
-  try {
-    // Use MongoDB $sample for true random fast sampling
-    const products = await Product.aggregate([
-      { $sample: { size: limit } },
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          img: 1
-        }
-      }
-    ]);
-
-    // Return empty array if no products found (no fallback to old file)
-    if (!products.length) {
-      console.log('⚠️ No products found in MongoDB for random products');
-      return [];
-    }
-
-    return products.map(product => ({
-      productId: product._id,
-      name: product.name || 'Unknown Product',
-      img: getValidImage(product.img),
-      type: 'all',
-      score: 1,
-      frequency: 1
-    }));
-  } catch (error) {
-    console.error('❌ Error getting random products from MongoDB:', error);
-    // Return empty array instead of falling back to old file
-    return [];
-  }
-}
-
-// Get user's favorite products
-async function getFavoriteProducts(userId, limit) {
-  try {
-    const UserFavorites = require('../models/UserFavorites');
-    const Product = require('../models/Product');
-
-    const favoriteProducts = await UserFavorites.find({ userId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    if (!favoriteProducts.length) {
-      return [];
-    }
-
-    // Get product details
-    const productIds = favoriteProducts.map(fp => fp.productId);
-    const products = await Product.find({
-      _id: { $in: productIds }
-    }).select('name img').lean();
-
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    return favoriteProducts.map(favorite => {
-      const prod = productMap.get(favorite.productId);
-      return {
-        productId: favorite.productId,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'favorite',
-        isFavorited: true
-      };
-    });
-
-  } catch (error) {
-    console.error('Error getting favorite products:', error);
-    return [];
-  }
-}
 
 // Track product interaction for suggestions
 exports.trackProductInteraction = async (req, res) => {
@@ -1221,145 +911,6 @@ exports.getFeatureImportance = async (req, res) => {
   }
 };
 
-// Get recent products for all group members (FAST: cached, indexed queries like SmartCart)
-async function getGroupRecentlyAddedProducts(groupId, limit) {
-  try {
-    // FAST: Check cache first
-    const cached = getCachedRecent(groupId);
-    if (cached) {
-      return cached.slice(0, limit);
-    }
-
-    const Group = require('../models/Group');
-    const ProductHistory = require('../models/ProductHistory');
-
-    const group = await Group.findById(groupId);
-    if (!group) return await getRandomProducts(limit);
-
-    const memberIds = group.members.map(m => m.user);
-
-    // FAST: Simple indexed query - get recent purchases with product info in one query
-    const recentPurchases = await ProductHistory.aggregate([
-      {
-        $match: {
-          userId: { $in: memberIds },
-          action: 'purchased'
-        }
-      },
-      { $sort: { createdAt: -1 } },
-      { $limit: limit * 3 }, // Get more to filter
-      {
-        $group: {
-          _id: '$productId',
-          lastPurchase: { $first: '$createdAt' },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { lastPurchase: -1 } },
-      { $limit: limit }
-    ]);
-
-    if (!recentPurchases.length) {
-      const fallback = await getRandomProducts(limit);
-      setCachedRecent(groupId, fallback);
-      return fallback;
-    }
-
-    // Get product details from MongoDB instead of old products.json
-    const productIds = recentPurchases.map(r => r._id);
-    const products = await Product.find({ _id: { $in: productIds } }).select('name img').lean();
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    // FAST: Return simple results immediately
-    const results = recentPurchases.map(r => {
-      const prod = productMap.get(r._id.toString());
-      return {
-        productId: r._id,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'recent',
-        frequency: r.count || 1,
-        lastPurchaseDate: r.lastPurchase
-      };
-    });
-
-    // FAST: Cache results for next request
-    setCachedRecent(groupId, results);
-    return results;
-
-  } catch (error) {
-    console.error('[recent] Error:', error.message);
-    return await getRandomProducts(limit);
-  }
-}
-
-// Get favorite products for all group members (BLAZING FAST: minimal queries, direct lookups)
-async function getGroupFavoriteProducts(groupId, limit) {
-  try {
-    // ULTRA FAST: Check cache first
-    const cached = getCachedFavorites(groupId);
-    if (cached) {
-      return cached.slice(0, limit);
-    }
-
-    const Group = require('../models/Group');
-    const ProductHistory = require('../models/ProductHistory');
-
-    const group = await Group.findById(groupId);
-    if (!group) return await getRandomProducts(limit);
-
-    const memberIds = group.members.map(m => m.user);
-
-    // ULTRA FAST: Simple query - just get recent interactions
-    const recentInteractions = await ProductHistory.find({
-      userId: { $in: memberIds },
-      action: { $in: ['favorited', 'added', 'purchased'] }
-    })
-      .sort({ createdAt: -1 })
-      .limit(limit * 2) // Get more to filter
-      .lean(); // Ultra fast - no mongoose overhead
-
-    if (!recentInteractions.length) {
-      const fallback = await getRandomProducts(limit);
-      setCachedFavorites(groupId, fallback);
-      return fallback;
-    }
-
-    // ULTRA FAST: Get unique product IDs
-    const productIds = [...new Set(recentInteractions.map(r => r.productId.toString()))].slice(0, limit);
-
-    // Get product details from MongoDB instead of old products.json
-    const products = await Product.find({ _id: { $in: productIds } }).select('name img').lean();
-    const productMap = new Map(products.map(p => [p._id.toString(), p]));
-
-    // ULTRA FAST: Simple mapping with minimal processing
-    const results = productIds.map(productId => {
-      const prod = productMap.get(productId);
-      const interactions = recentInteractions.filter(r => r.productId.toString() === productId);
-
-      return {
-        productId: productId,
-        name: prod?.name || 'Unknown Product',
-        img: getValidImage(prod?.img),
-        type: 'favorite',
-        totalInteractions: interactions.length,
-        lastInteraction: interactions[0]?.createdAt,
-        isFavorited: interactions.some(i => i.action === 'favorited'),
-        isPurchased: interactions.some(i => i.action === 'purchased'),
-        isAdded: interactions.some(i => i.action === 'added'),
-        frequency: interactions.length
-      };
-    });
-
-    // ULTRA FAST: Cache results
-    setCachedFavorites(groupId, results);
-    return results;
-
-  } catch (error) {
-    console.error('[favorite] Error:', error.message);
-    return await getRandomProducts(limit);
-  }
-}
 
 // Export getValidImage function for use in other modules
 module.exports = {
